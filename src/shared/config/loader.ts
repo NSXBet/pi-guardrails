@@ -64,6 +64,18 @@ export function createGuardrailsConfigLoader(): GuardrailsConfigLoader {
         resolved.permissionGate.useBuiltinMatchers = false;
       }
 
+      // Booleans resolve by scope precedence (memory > local > global > default).
+      resolved.permissionGate.yolo =
+        memory?.permissionGate?.yolo ??
+        local?.permissionGate?.yolo ??
+        global?.permissionGate?.yolo ??
+        DEFAULT_CONFIG.permissionGate.yolo;
+      resolved.permissionGate.yoloRespectAutoDeny =
+        memory?.permissionGate?.yoloRespectAutoDeny ??
+        local?.permissionGate?.yoloRespectAutoDeny ??
+        global?.permissionGate?.yoloRespectAutoDeny ??
+        DEFAULT_CONFIG.permissionGate.yoloRespectAutoDeny;
+
       const mergedPaths = new Map<string, AllowedPath>();
       for (const paths of [
         global?.pathAccess?.allowedPaths,
