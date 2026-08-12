@@ -22,10 +22,29 @@ import {
   type GuardrailsPromptOpenedPayload,
 } from "../../src/shared/events";
 import permissionGate from "./index";
+import { GUIDANCE_MARKER_PREFIX, issueApproval } from "./guidance";
+import * as configModule from "../../src/shared/config";
+
+const mockModule = configModule as unknown as {
+  __setPermissionGate: (o: Record<string, unknown>) => void;
+  __setRawConfig: (raw: Record<string, unknown> | null) => void;
+};
+
+function setPermissionGate(overrides: Record<string, unknown>) {
+  mockModule.__setPermissionGate(overrides);
+}
+
+function setRawConfig(raw: Record<string, unknown> | null) {
+  mockModule.__setRawConfig(raw);
+}
 
 // Control the config the hook sees without touching the real config loader.
 vi.mock("../../src/shared/config", () => {
-  function makeConfig(overrides: Record<string, unknown> = {}) {
+  const state = {
+    overrides: {} as Record<string, unknown>,
+    rawConfig: null as Record<string, unknown> | null,
+  };
+  function makeConfig() {
     return {
       enabled: true,
       features: { permissionGate: true, policies: true, pathAccess: true },
@@ -35,15 +54,25 @@ vi.mock("../../src/shared/config", () => {
         requireConfirmation: true,
         allowedPatterns: [],
         autoDenyPatterns: [],
-        ...overrides,
+        yolo: false,
+        yoloRespectAutoDeny: false,
+        ...state.overrides,
       },
     };
   }
 
   return {
+    __setPermissionGate(overrides: Record<string, unknown>) {
+      state.overrides = overrides;
+    },
+    __setRawConfig(raw: Record<string, unknown> | null) {
+      state.rawConfig = raw;
+    },
     configLoader: {
       load: vi.fn().mockResolvedValue(undefined),
+      save: vi.fn().mockResolvedValue(undefined),
       getConfig: vi.fn(() => makeConfig()),
+      getRawConfig: vi.fn(() => state.rawConfig),
     },
   };
 });
@@ -265,5 +294,190 @@ describe("permissionGate extension hook", () => {
         block: expect.objectContaining({ source: "nonInteractive" }),
       }),
     );
+  });
+
+  describe("yolo mode", () => {
+    beforeEach(() => {
+      setPermissionGate({ yolo: true });
+    });
+
+    it("skips the confirmation prompt for dangerous commands", async () => {
+      assert(toolCallHandler, "tool_call handler should be registered");
+
+      const ctx = createCtx();
+      const result = await toolCallHandler(DANGEROUS_EVENT, ctx);
+
+      expect(result).toBeUndefined();
+      expect(ctx.ui.custom).not.toHaveBeenCalled();
+      expect(ctx.ui.select).not.toHaveBeenCalled();
+    });
+
+    it("bypasses autoDeny when yoloRespectAutoDeny is false", async () => {
+      assert(toolCallHandler, "tool_call handler should be registered");
+      setPermissionGate({
+        yolo: true,
+        yoloRespectAutoDeny: false,
+        autoDenyPatterns: [{ pattern: "dangerous-cmd", description: "denied" }],
+      });
+
+      const result = await toolCallHandler(DANGEROUS_EVENT, createCtx());
+      expect(result).toBeUndefined();
+    });
+
+    it("still blocks autoDeny when yoloRespectAutoDeny is true", async () => {
+      assert(toolCallHandler, "tool_call handler should be registered");
+      setPermissionGate({
+        yolo: true,
+        yoloRespectAutoDeny: true,
+        autoDenyPatterns: [{ pattern: "dangerous-cmd", description: "denied" }],
+      });
+
+      const result = await toolCallHandler(DANGEROUS_EVENT, createCtx());
+      expect(result).toEqual({
+        block: true,
+        reason: expect.stringContaining("denied"),
+      });
+    });
+  });
+
+  describe("guidance", () => {
+    beforeEach(() => {
+      setPermissionGate({ patterns: [] });
+      setRawConfig({
+        permissionGate: {
+          customPatterns: [
+            {
+              pattern: "dangerous-cmd",
+              description: "blocking description",
+              guidance: "do the safe thing instead",
+              regex: true,
+            },
+          ],
+        },
+      });
+    });
+
+    it("soft-blocks a matched command with guidance and an approval marker", async () => {
+      assert(toolCallHandler, "tool_call handler should be registered");
+
+      const result = await toolCallHandler(DANGEROUS_EVENT, createCtx());
+
+      expect(result?.block).toBe(true);
+      expect(result?.reason).toContain("do the safe thing instead");
+      expect(result?.reason).toContain(GUIDANCE_MARKER_PREFIX);
+      expect(pi.events.emit).toHaveBeenCalledWith(
+        GUARDRAILS_ACTION_BLOCKED_EVENT,
+        expect.objectContaining({
+          block: expect.objectContaining({ source: "permission" }),
+        }),
+      );
+    });
+
+    it("keeps soft-blocking when the marker id is wrong", async () => {
+      assert(toolCallHandler, "tool_call handler should be registered");
+
+      const event = {
+        ...DANGEROUS_EVENT,
+        input: {
+          command: `dangerous-cmd ${GUIDANCE_MARKER_PREFIX}wrong-id`,
+        },
+      } satisfies BashToolCallEvent;
+
+      const result = await toolCallHandler(event, createCtx());
+      expect(result?.block).toBe(true);
+      expect(result?.reason).toContain("do the safe thing instead");
+    });
+
+    it("allows the command when resent with the correct approval id", async () => {
+      assert(toolCallHandler, "tool_call handler should be registered");
+
+      const rawCommand = "dangerous-cmd";
+      const id = issueApproval(rawCommand);
+      const event = {
+        ...DANGEROUS_EVENT,
+        input: { command: `${rawCommand} ${GUIDANCE_MARKER_PREFIX}${id}` },
+      } satisfies BashToolCallEvent;
+
+      const result = await toolCallHandler(event, createCtx());
+      expect(result).toBeUndefined();
+    });
+
+    it("still enforces guidance in yolo mode", async () => {
+      assert(toolCallHandler, "tool_call handler should be registered");
+      setPermissionGate({ yolo: true, patterns: [] });
+
+      const result = await toolCallHandler(DANGEROUS_EVENT, createCtx());
+      expect(result?.block).toBe(true);
+      expect(result?.reason).toContain("do the safe thing instead");
+    });
+
+    it("reads guidanceOnlyPatterns entries too", async () => {
+      assert(toolCallHandler, "tool_call handler should be registered");
+      setRawConfig({
+        guidanceOnlyPatterns: [
+          { pattern: "dangerous-cmd", guidance: "only guidance here", regex: true },
+        ],
+      });
+
+      const result = await toolCallHandler(DANGEROUS_EVENT, createCtx());
+      expect(result?.block).toBe(true);
+      expect(result?.reason).toContain("only guidance here");
+    });
+  });
+
+  describe("before_agent_start system prompt", () => {
+    function registeredBeforeAgentStart(pi: DeepMocked<ExtensionAPI>) {
+      const calls: unknown[][] = pi.on.mock.calls;
+      return calls.find(([event]) => event === "before_agent_start")?.[1] as
+        | ExtensionHandler<
+            import("@earendil-works/pi-coding-agent").BeforeAgentStartEvent,
+            import("@earendil-works/pi-coding-agent").BeforeAgentStartEventResult
+          >
+        | undefined;
+    }
+
+    it("appends guidance instructions when guidance patterns exist", async () => {
+      setRawConfig({
+        permissionGate: {
+          customPatterns: [
+            { pattern: "dangerous-cmd", guidance: "be careful", regex: true },
+          ],
+        },
+      });
+      const handler = registeredBeforeAgentStart(pi);
+      assert(handler, "before_agent_start handler should be registered");
+
+      const result = await handler(
+        {
+          type: "before_agent_start",
+          prompt: "hi",
+          systemPrompt: "BASE",
+          systemPromptOptions: {},
+        } as never,
+        createCtx(),
+      );
+
+      expect(result?.systemPrompt).toContain("BASE");
+      expect(result?.systemPrompt).toContain("Guardrails guidance");
+      expect(result?.systemPrompt).toContain(GUIDANCE_MARKER_PREFIX);
+    });
+
+    it("returns undefined when no guidance patterns exist", async () => {
+      setRawConfig(null);
+      const handler = registeredBeforeAgentStart(pi);
+      assert(handler, "before_agent_start handler should be registered");
+
+      const result = await handler(
+        {
+          type: "before_agent_start",
+          prompt: "hi",
+          systemPrompt: "BASE",
+          systemPromptOptions: {},
+        } as never,
+        createCtx(),
+      );
+
+      expect(result).toBeUndefined();
+    });
   });
 });

@@ -127,7 +127,23 @@ export interface GuardrailsConfig {
     allowedPatterns?: PatternConfig[];
     /** Command patterns that are always blocked without prompting. */
     autoDenyPatterns?: PatternConfig[];
+    /**
+     * Bypass all confirmation prompts and auto-deny blocks. Guidance patterns
+     * still run. Default false.
+     */
+    yolo?: boolean;
+    /** When true, autoDenyPatterns still block even in yolo mode. Default false. */
+    yoloRespectAutoDeny?: boolean;
   };
+}
+
+/**
+ * Top-level config additions carried by the user's config file. Guidance
+ * patterns are read from `permissionGate.customPatterns` entries that carry a
+ * `guidance` field, plus this `guidanceOnlyPatterns` array.
+ */
+export interface GuardrailsGuidanceExtras {
+  guidanceOnlyPatterns?: PatternConfig[];
 }
 
 export interface ResolvedConfig {
@@ -150,5 +166,7 @@ export interface ResolvedConfig {
     requireConfirmation: boolean;
     allowedPatterns: PatternConfig[];
     autoDenyPatterns: PatternConfig[];
+    yolo: boolean;
+    yoloRespectAutoDeny: boolean;
   };
 }

@@ -114,5 +114,7 @@ export const DEFAULT_CONFIG: ResolvedConfig = {
     requireConfirmation: true,
     allowedPatterns: [],
     autoDenyPatterns: [],
+    yolo: false,
+    yoloRespectAutoDeny: false,
   },
 };

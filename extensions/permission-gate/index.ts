@@ -17,15 +17,55 @@ import {
   setupLegacyPromptEventAlias,
 } from "../../src/shared/events";
 import { isCommandAllowed, saveCommandSessionGrant } from "./grants";
+import {
+  consumeApproval,
+  extractApprovalId,
+  GUIDANCE_MARKER_PREFIX,
+  issueApproval,
+} from "./guidance";
 import { createPermissionGateConfirmComponent } from "./prompt";
 import {
+  collectGuidancePatterns,
   createPermissionGateRule,
   formatAutoDenyReason,
   matchCommandPattern,
+  matchGuidancePattern,
 } from "./rules";
 
 export default async function permissionGate(pi: ExtensionAPI) {
   await configLoader.load();
+
+  pi.registerCommand("guardrails:yolo", {
+    description: "Toggle yolo mode (skip permission-gate prompts)",
+    handler: async (args, cmdCtx) => {
+      const pg = configLoader.getConfig().permissionGate;
+      const arg = args.trim().toLowerCase();
+
+      if (arg === "" || arg === "status") {
+        cmdCtx.ui.notify(
+          `[Guardrails] yolo mode is ${pg.yolo ? "on" : "off"}.`,
+          "info",
+        );
+        return;
+      }
+
+      const next = arg === "on" ? true : arg === "off" ? false : null;
+      if (next === null) {
+        cmdCtx.ui.notify(
+          "[Guardrails] usage: /guardrails:yolo [on|off|status]",
+          "warning",
+        );
+        return;
+      }
+
+      await configLoader.save("memory", { permissionGate: { yolo: next } });
+      await configLoader.load();
+      cmdCtx.ui.notify(
+        `[Guardrails] yolo mode ${next ? "enabled" : "disabled"} for this session.`,
+        "info",
+      );
+    },
+  });
 
   pi.events.on(GUARDRAILS_FEATURE_REQUEST_EVENT, () => {
     pi.events.emit(
@@ -35,6 +75,24 @@ export default async function permissionGate(pi: ExtensionAPI) {
   });
   setupLegacyPromptEventAlias(pi, "permissionGate");
 
+  // Teach the agent how to respond to a guidance soft-block: read the message,
+  // then resend the same command with the single-use approval marker.
+  pi.on("before_agent_start", (event) => {
+    const config = configLoader.getConfig();
+    if (!config.enabled || !config.features.permissionGate) return;
+    if (collectGuidancePatterns(configLoader).length === 0) return;
+
+    const instructions = [
+      "",
+      "## Guardrails guidance",
+      "Some commands are gated by a guidance rule. When one is blocked you will receive a message explaining the concern, ending with a single-use approval marker like `# guardrails:approve:<id>`.",
+      "To proceed: read the guidance, then resend the exact same command with that marker appended. The id is single-use and expires after a few minutes.",
+      "Do not invent or reuse marker ids, and do not strip the gated command down to dodge the rule. If the guidance says to stop and ask the user, stop and ask.",
+    ].join("\n");
+
+    return { systemPrompt: event.systemPrompt + instructions };
+  });
+
   pi.on("tool_call", async (event, ctx) => {
     const config = configLoader.getConfig();
     if (!config.enabled || !config.features.permissionGate) return;
@@ -43,6 +101,41 @@ export default async function permissionGate(pi: ExtensionAPI) {
     const command = event.input.command;
     const action = { kind: "command" as const, command, origin: "bash" };
     if (isCommandAllowed(command)) return;
+
+    const pg = config.permissionGate;
+
+    // Guidance: soft-block with an educational message + single-use approval
+    // marker. Resending with the correct marker allows it. Runs in all modes,
+    // including yolo. Match against the command with any marker stripped so an
+    // approved retry doesn't re-match on the marker text itself.
+    const approvalId = extractApprovalId(command);
+    const baseCommand = approvalId
+      ? command.replace(GUIDANCE_MARKER_PREFIX + approvalId, "").trim()
+      : command;
+
+    const guidancePatterns = collectGuidancePatterns(configLoader);
+    const guidanceMatch = matchGuidancePattern(baseCommand, guidancePatterns);
+    if (guidanceMatch) {
+      const approved = approvalId !== null && consumeApproval(baseCommand, approvalId);
+      if (!approved) {
+        const freshId = issueApproval(baseCommand);
+        const reason = `${guidanceMatch.description.trim()} To run this anyway, resend the command with the marker: ${GUIDANCE_MARKER_PREFIX}${freshId}`;
+
+        emitActionBlocked(pi, {
+          feature: "permissionGate",
+          action,
+          reason,
+          block: { source: "permission", metadata: guidanceMatch },
+          context: { toolName: "bash", input: event.input },
+        });
+
+        return { block: true, reason };
+      }
+      // Approved via marker: fall through (yolo/autoDeny/confirm still apply).
+    }
+
+    // Yolo: skip autoDeny and confirmation prompts.
+    if (pg.yolo && !pg.yoloRespectAutoDeny) return;
 
     const autoDenyMatch = matchCommandPattern(
       command,
@@ -62,6 +155,9 @@ export default async function permissionGate(pi: ExtensionAPI) {
 
       return { block: true, reason };
     }
+
+    // Yolo with yoloRespectAutoDeny: autoDeny ran above, skip the rest.
+    if (pg.yolo) return;
 
     const safety = await checkAction(action, [
       createPermissionGateRule({
