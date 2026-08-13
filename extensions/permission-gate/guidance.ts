@@ -1,9 +1,5 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes } from "node:crypto";
 
-/** Marker the model appends to a command to self-approve a guidance block. */
-export const GUIDANCE_MARKER_PREFIX = "# guardrails:approve:";
-
-/** How long an issued approval id stays valid. */
 const APPROVAL_TTL_MS = 5 * 60 * 1000;
 
 interface Approval {
@@ -11,10 +7,6 @@ interface Approval {
   expiresAt: number;
 }
 
-/**
- * Single-use, expiring approval ids. In-memory only — approvals do not survive
- * a session restart. This is process-global state shared across the hook.
- */
 const approvals = new Map<string, Approval>();
 
 function sweepExpired(now: number): void {
@@ -23,44 +15,34 @@ function sweepExpired(now: number): void {
   }
 }
 
-/** Issue a fresh approval id bound to a specific command. */
+/** Issue a short 7-char hex approval id (like a git short hash). */
 export function issueApproval(command: string): string {
   const now = Date.now();
   sweepExpired(now);
-  const id = randomUUID();
+  const id = randomBytes(4).toString("hex").slice(0, 7);
   approvals.set(id, { command, expiresAt: now + APPROVAL_TTL_MS });
   return id;
 }
 
-/**
- * Extract the approval id from a command's marker, if present.
- * Matches `# guardrails:approve:<id>` where `<id>` is non-whitespace.
- */
-export function extractApprovalId(command: string): string | null {
-  const index = command.indexOf(GUIDANCE_MARKER_PREFIX);
-  if (index === -1) return null;
-  const id = command
-    .slice(index + GUIDANCE_MARKER_PREFIX.length)
-    .trim()
-    .split(/\s+/)[0];
-  return id ? id : null;
+/** Peek at the stored command for an id without consuming it. */
+export function peekApproval(id: string): string | null {
+  const approval = approvals.get(id);
+  if (!approval || approval.expiresAt <= Date.now()) return null;
+  return approval.command;
 }
 
 /**
- * Consume an approval id for a command. Returns true only when the id exists,
- * is unexpired, and was issued for this exact command. Consumed ids are removed
- * so they cannot be reused.
+ * Consume an approval id. Returns the stored command if the id exists and
+ * is unexpired, null otherwise. Consumed ids are removed — single use.
  */
-export function consumeApproval(command: string, id: string): boolean {
+export function consumeApproval(id: string): string | null {
   const now = Date.now();
   sweepExpired(now);
   const approval = approvals.get(id);
-  if (!approval) return false;
-  if (approval.expiresAt <= now) {
+  if (!approval || approval.expiresAt <= now) {
     approvals.delete(id);
-    return false;
+    return null;
   }
-  if (approval.command !== command) return false;
   approvals.delete(id);
-  return true;
+  return approval.command;
 }

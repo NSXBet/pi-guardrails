@@ -22,7 +22,6 @@ import {
   type GuardrailsPromptOpenedPayload,
 } from "../../src/shared/events";
 import permissionGate from "./index";
-import { GUIDANCE_MARKER_PREFIX, issueApproval } from "./guidance";
 import * as configModule from "../../src/shared/config";
 
 const mockModule = configModule as unknown as {
@@ -357,49 +356,20 @@ describe("permissionGate extension hook", () => {
       });
     });
 
-    it("soft-blocks a matched command with guidance and an approval marker", async () => {
+    it("soft-blocks a matched command and tells model to call guardrails_run_anyway", async () => {
       assert(toolCallHandler, "tool_call handler should be registered");
 
       const result = await toolCallHandler(DANGEROUS_EVENT, createCtx());
 
       expect(result?.block).toBe(true);
       expect(result?.reason).toContain("do the safe thing instead");
-      expect(result?.reason).toContain(GUIDANCE_MARKER_PREFIX);
+      expect(result?.reason).toContain("guardrails_run_anyway");
       expect(pi.events.emit).toHaveBeenCalledWith(
         GUARDRAILS_ACTION_BLOCKED_EVENT,
         expect.objectContaining({
           block: expect.objectContaining({ source: "permission" }),
         }),
       );
-    });
-
-    it("keeps soft-blocking when the marker id is wrong", async () => {
-      assert(toolCallHandler, "tool_call handler should be registered");
-
-      const event = {
-        ...DANGEROUS_EVENT,
-        input: {
-          command: `dangerous-cmd ${GUIDANCE_MARKER_PREFIX}wrong-id`,
-        },
-      } satisfies BashToolCallEvent;
-
-      const result = await toolCallHandler(event, createCtx());
-      expect(result?.block).toBe(true);
-      expect(result?.reason).toContain("do the safe thing instead");
-    });
-
-    it("allows the command when resent with the correct approval id", async () => {
-      assert(toolCallHandler, "tool_call handler should be registered");
-
-      const rawCommand = "dangerous-cmd";
-      const id = issueApproval(rawCommand);
-      const event = {
-        ...DANGEROUS_EVENT,
-        input: { command: `${rawCommand} ${GUIDANCE_MARKER_PREFIX}${id}` },
-      } satisfies BashToolCallEvent;
-
-      const result = await toolCallHandler(event, createCtx());
-      expect(result).toBeUndefined();
     });
 
     it("still enforces guidance in yolo mode", async () => {
@@ -459,7 +429,7 @@ describe("permissionGate extension hook", () => {
 
       expect(result?.systemPrompt).toContain("BASE");
       expect(result?.systemPrompt).toContain("Guardrails guidance");
-      expect(result?.systemPrompt).toContain(GUIDANCE_MARKER_PREFIX);
+      expect(result?.systemPrompt).toContain("guardrails_run_anyway");
     });
 
     it("returns undefined when no guidance patterns exist", async () => {
