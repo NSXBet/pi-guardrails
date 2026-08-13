@@ -11,6 +11,91 @@ This package installs four Pi extensions:
 - **permission-gate** for confirming or blocking risky shell commands.
 - **herdr** for reporting Guardrails approval prompts to Herdr.
 
+---
+
+## Fork additions (yurifrl)
+
+This is a fork of [`aliou/pi-guardrails`](https://github.com/aliou/pi-guardrails). Everything below this section is unchanged upstream behaviour. The additions live entirely inside `permission-gate`.
+
+### Guidance
+
+Soft-block dangerous commands with an educational message instead of immediately prompting the user. Add a `guidance` field to any entry in `permissionGate.customPatterns`, or add entries to the top-level `guidanceOnlyPatterns` array:
+
+```json
+{
+  "permissionGate": {
+    "customPatterns": [
+      {
+        "pattern": "git push.*(--force|-f)",
+        "description": "force push",
+        "guidance": "Force push is gated — your rules say NEVER force push. STOP and ask the user.",
+        "regex": true
+      }
+    ]
+  },
+  "guidanceOnlyPatterns": [
+    {
+      "pattern": "(^|[^a-zA-Z0-9_])op\\s",
+      "guidance": "op (1Password CLI) reads secrets — route THROUGH 1Password, never copy raw secrets to disk.",
+      "regex": true
+    }
+  ]
+}
+```
+
+When a guidance pattern matches, the agent receives the guidance message and is told to call the `guardrails_run_anyway` tool if it still wants to proceed. The command then runs through the full normal gate — auto-deny still blocks, and dangerous commands still show the user a confirmation prompt.
+
+The approval id is single-use and expires after 5 minutes. The system prompt is automatically extended with instructions explaining this flow whenever guidance patterns are configured.
+
+### YOLO mode
+
+Skip all confirmation prompts and auto-deny blocks for the session:
+
+```text
+/guardrails:yolo on
+/guardrails:yolo off
+/guardrails:yolo status
+```
+
+Guidance still runs in yolo mode — the agent still receives guidance messages and must call `guardrails_run_anyway` to proceed. To make auto-deny patterns block even in yolo mode, set `permissionGate.yoloRespectAutoDeny: true` in your config.
+
+### `guardrails_run_anyway` tool
+
+Registered automatically by `permission-gate`. The agent calls this tool after reading a guidance message and deciding to proceed. It accepts the single-use id from the block message, resolves the stored command, and runs it through the full gate (auto-deny + user confirmation if dangerous).
+
+### Config example
+
+```json
+{
+  "permissionGate": {
+    "yolo": false,
+    "yoloRespectAutoDeny": false,
+    "customPatterns": [
+      {
+        "pattern": "\\brm\\s",
+        "description": "delete files",
+        "guidance": "rm is gated — for source under version control, move to trash path instead. rm is fine only for .agents/tmp, build outputs, or already-committed files.",
+        "regex": true
+      },
+      {
+        "pattern": "git stash",
+        "description": "stash uncommitted work",
+        "guidance": "git stash is gated — it hides uncommitted work and is easy to lose track of. Prefer committing instead."
+      }
+    ]
+  },
+  "guidanceOnlyPatterns": [
+    {
+      "pattern": "(^|[^a-zA-Z0-9_])op\\s",
+      "guidance": "op (1Password CLI) will ask for user input — avoid using it or do all you can before requesting user attention.",
+      "regex": true
+    }
+  ]
+}
+```
+
+---
+
 ## Install
 
 ```bash
@@ -78,21 +163,6 @@ It catches built-in risky patterns like recursive deletes, privileged commands, 
 ## Extension events
 
 Guardrails emits paired prompt lifecycle events on Pi's shared event bus:
-
-- `guardrails:prompt:opened` when an interactive Guardrails prompt starts waiting for input.
-- `guardrails:prompt:closed` when that prompt stops waiting, including when the UI throws.
-
-Both events include the same `prompt.id` for correlation.
-
-## Configuration
-
-Most configuration should happen through the interactive settings UI:
-
-```text
-/guardrails:settings
-```
-
-Advanced users can edit the settings file directly:
 
 - Global: `~/.pi/agent/extensions/guardrails.json`
 - Project: `.pi/extensions/guardrails.json`
