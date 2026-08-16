@@ -44,7 +44,7 @@ export default async function permissionGate(pi: ExtensionAPI) {
 
       if (arg === "" || arg === "status") {
         cmdCtx.ui.notify(
-          `[Guardrails] yolo mode is ${pg.yolo ? "on" : "off"}.`,
+          `${pg.yolo ? "🛹 " : ""}[Guardrails] yolo mode is ${pg.yolo ? "on" : "off"}.`,
           "info",
         );
         return;
@@ -62,7 +62,7 @@ export default async function permissionGate(pi: ExtensionAPI) {
       await configLoader.save("memory", { permissionGate: { yolo: next } });
       await configLoader.load();
       cmdCtx.ui.notify(
-        `[Guardrails] yolo mode ${next ? "enabled" : "disabled"} for this session.`,
+        `${next ? "🛹 " : ""}[Guardrails] yolo mode ${next ? "enabled" : "disabled"} for this session.`,
         "info",
       );
     },
