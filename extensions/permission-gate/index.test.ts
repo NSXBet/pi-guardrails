@@ -1,5 +1,7 @@
 import type {
   BashToolCallEvent,
+  BeforeAgentStartEvent,
+  BeforeAgentStartEventResult,
   ExtensionAPI,
   ExtensionContext,
   ExtensionHandler,
@@ -12,7 +14,16 @@ import {
   type DeepMocked,
   type PartialFuncReturn,
 } from "@golevelup/ts-vitest";
-import { assert, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  assert,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
+import * as configModule from "../../src/shared/config";
 import {
   GUARDRAILS_ACTION_BLOCKED_EVENT,
   GUARDRAILS_FEATURE_REGISTER_EVENT,
@@ -22,7 +33,6 @@ import {
   type GuardrailsPromptOpenedPayload,
 } from "../../src/shared/events";
 import permissionGate from "./index";
-import * as configModule from "../../src/shared/config";
 
 const mockModule = configModule as unknown as {
   __setPermissionGate: (o: Record<string, unknown>) => void;
@@ -93,6 +103,7 @@ function createCtx(overrides: PartialFuncReturn<ExtensionContext> = {}) {
       custom: vi.fn().mockResolvedValue(undefined),
       select: vi.fn().mockResolvedValue(undefined),
       notify: vi.fn(),
+      setStatus: vi.fn(),
     },
     abort: vi.fn(),
     ...overrides,
@@ -339,6 +350,169 @@ describe("permissionGate extension hook", () => {
     });
   });
 
+  describe("guardrails:yolo commands", () => {
+    function registeredCommand(name: string) {
+      const calls: unknown[][] = pi.registerCommand.mock.calls;
+      return calls.find(([commandName]) => commandName === name)?.[1] as
+        | {
+            getArgumentCompletions?: (prefix: string) => unknown;
+            handler: (args: string, ctx: ExtensionContext) => Promise<void>;
+          }
+        | undefined;
+    }
+
+    it("registers /guardrails:yolo with on and off argument completions", () => {
+      const command = registeredCommand("guardrails:yolo");
+      assert(command, "guardrails:yolo should be registered");
+
+      expect(command.getArgumentCompletions?.("")).toEqual([
+        expect.objectContaining({ value: "on" }),
+        expect.objectContaining({ value: "off" }),
+      ]);
+    });
+
+    it("enables yolo with /guardrails:yolo on", async () => {
+      const command = registeredCommand("guardrails:yolo");
+      assert(command, "guardrails:yolo should be registered");
+      const ctx = createCtx();
+
+      await command.handler("on", ctx);
+
+      expect(configModule.configLoader.save).toHaveBeenCalledWith("memory", {
+        permissionGate: { yolo: true },
+      });
+      expect(ctx.ui.notify).toHaveBeenCalledWith(
+        expect.stringContaining("enabled"),
+        "info",
+      );
+    });
+
+    it("keeps the memory override after enabling yolo", async () => {
+      const command = registeredCommand("guardrails:yolo");
+      assert(command, "guardrails:yolo should be registered");
+
+      await command.handler("on", createCtx());
+
+      expect(configModule.configLoader.load).toHaveBeenCalledTimes(1);
+    });
+
+    it("disables yolo with /guardrails:yolo off", async () => {
+      const command = registeredCommand("guardrails:yolo");
+      assert(command, "guardrails:yolo should be registered");
+      const ctx = createCtx();
+
+      await command.handler("off", ctx);
+
+      expect(configModule.configLoader.save).toHaveBeenCalledWith("memory", {
+        permissionGate: { yolo: false },
+      });
+      expect(ctx.ui.notify).toHaveBeenCalledWith(
+        expect.stringContaining("disabled"),
+        "info",
+      );
+    });
+
+    it("/guardrails:yolo status reports current state without changing it", async () => {
+      setPermissionGate({ yolo: true });
+      const command = registeredCommand("guardrails:yolo");
+      assert(command, "guardrails:yolo should be registered");
+      const ctx = createCtx();
+
+      await command.handler("status", ctx);
+
+      expect(configModule.configLoader.save).not.toHaveBeenCalled();
+      expect(ctx.ui.notify).toHaveBeenCalledWith(
+        expect.stringContaining("on"),
+        "info",
+      );
+    });
+    it("adds a skateboard to Guardrails' footer status while yolo is on", async () => {
+      setPermissionGate({ yolo: true });
+      const command = registeredCommand("guardrails:yolo");
+      assert(command, "guardrails:yolo should be registered");
+      const ctx = createCtx();
+
+      await command.handler("status", ctx);
+
+      expect(ctx.ui.setStatus).toHaveBeenCalledWith("guardrails-yolo", "🛹");
+    });
+
+    it("clears Guardrails' footer status when yolo is off", async () => {
+      const command = registeredCommand("guardrails:yolo");
+      assert(command, "guardrails:yolo should be registered");
+      const ctx = createCtx();
+
+      await command.handler("off", ctx);
+
+      expect(ctx.ui.setStatus).toHaveBeenCalledWith(
+        "guardrails-yolo",
+        undefined,
+      );
+    });
+  });
+
+  describe("guardrails-yolo flag and env activation", () => {
+    function registeredSessionStart(mockedPi: DeepMocked<ExtensionAPI>) {
+      const calls: unknown[][] = mockedPi.on.mock.calls;
+      return calls.find(([event]) => event === "session_start")?.[1] as
+        | ExtensionHandler<never, unknown>
+        | undefined;
+    }
+
+    const originalEnv = process.env.GUARDRAILS_YOLO;
+
+    afterEach(() => {
+      if (originalEnv === undefined) delete process.env.GUARDRAILS_YOLO;
+      else process.env.GUARDRAILS_YOLO = originalEnv;
+    });
+
+    it("registers the --guardrails-yolo CLI flag", () => {
+      expect(pi.registerFlag).toHaveBeenCalledWith(
+        "guardrails-yolo",
+        expect.objectContaining({ type: "string" }),
+      );
+    });
+
+    it("enables yolo on session_start when --guardrails-yolo=on", async () => {
+      delete process.env.GUARDRAILS_YOLO;
+      pi.getFlag.mockImplementation((name: string) =>
+        name === "guardrails-yolo" ? "on" : undefined,
+      );
+      const handler = registeredSessionStart(pi);
+      assert(handler, "session_start handler should be registered");
+
+      await handler({} as never, createCtx());
+
+      expect(configModule.configLoader.save).toHaveBeenCalledWith("memory", {
+        permissionGate: { yolo: true },
+      });
+    });
+
+    it("enables yolo on session_start from GUARDRAILS_YOLO=on when no flag is set", async () => {
+      process.env.GUARDRAILS_YOLO = "on";
+      pi.getFlag.mockImplementation(() => undefined);
+      const handler = registeredSessionStart(pi);
+      assert(handler, "session_start handler should be registered");
+
+      await handler({} as never, createCtx());
+
+      expect(configModule.configLoader.save).toHaveBeenCalledWith("memory", {
+        permissionGate: { yolo: true },
+      });
+    });
+
+    it("does nothing on session_start when neither flag nor env is set", async () => {
+      delete process.env.GUARDRAILS_YOLO;
+      pi.getFlag.mockImplementation(() => undefined);
+      const handler = registeredSessionStart(pi);
+      assert(handler, "session_start handler should be registered");
+
+      await handler({} as never, createCtx());
+
+      expect(configModule.configLoader.save).not.toHaveBeenCalled();
+    });
+  });
+
   describe("guidance", () => {
     beforeEach(() => {
       setPermissionGate({ patterns: [] });
@@ -372,20 +546,23 @@ describe("permissionGate extension hook", () => {
       );
     });
 
-    it("still enforces guidance in yolo mode", async () => {
+    it("bypasses guidance in yolo mode", async () => {
       assert(toolCallHandler, "tool_call handler should be registered");
       setPermissionGate({ yolo: true, patterns: [] });
 
       const result = await toolCallHandler(DANGEROUS_EVENT, createCtx());
-      expect(result?.block).toBe(true);
-      expect(result?.reason).toContain("do the safe thing instead");
+      expect(result).toBeUndefined();
     });
 
     it("reads guidanceOnlyPatterns entries too", async () => {
       assert(toolCallHandler, "tool_call handler should be registered");
       setRawConfig({
         guidanceOnlyPatterns: [
-          { pattern: "dangerous-cmd", guidance: "only guidance here", regex: true },
+          {
+            pattern: "dangerous-cmd",
+            guidance: "only guidance here",
+            regex: true,
+          },
         ],
       });
 
@@ -399,10 +576,7 @@ describe("permissionGate extension hook", () => {
     function registeredBeforeAgentStart(pi: DeepMocked<ExtensionAPI>) {
       const calls: unknown[][] = pi.on.mock.calls;
       return calls.find(([event]) => event === "before_agent_start")?.[1] as
-        | ExtensionHandler<
-            import("@earendil-works/pi-coding-agent").BeforeAgentStartEvent,
-            import("@earendil-works/pi-coding-agent").BeforeAgentStartEventResult
-          >
+        | ExtensionHandler<BeforeAgentStartEvent, BeforeAgentStartEventResult>
         | undefined;
     }
 

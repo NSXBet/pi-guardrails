@@ -116,5 +116,9 @@ export const DEFAULT_CONFIG: ResolvedConfig = {
     autoDenyPatterns: [],
     yolo: false,
     yoloRespectAutoDeny: false,
+    sessionEscalation: {
+      enabled: true,
+      approvalThreshold: 2,
+    },
   },
 };

@@ -98,6 +98,7 @@ function buildRightAlignedBorder(
 export function createPermissionGateConfirmComponent(
   command: string,
   description: string,
+  meta?: { agentReason?: string; approvalId?: string },
 ) {
   return (
     tui: { terminal: { rows: number; columns: number }; requestRender(): void },
@@ -113,7 +114,8 @@ export function createPermissionGateConfirmComponent(
     container.addChild(new DynamicBorder(redBorder));
     container.addChild(
       new Text(
-        theme.fg("error", theme.bold("Dangerous Command Detected")),
+        theme.fg("error", theme.bold("Dangerous Command Detected")) +
+          (meta?.approvalId ? ` ${theme.fg("dim", `(${meta.approvalId})`)}` : ""),
         1,
         0,
       ),
@@ -135,6 +137,10 @@ export function createPermissionGateConfirmComponent(
     container.addChild(commandBottomBorder);
     container.addChild(new Spacer(1));
     container.addChild(new Text(theme.fg("text", "Allow execution?"), 1, 0));
+    if (meta?.agentReason) {
+      container.addChild(new Spacer(1));
+      container.addChild(new Text(theme.fg("success", meta.agentReason), 1, 0));
+    }
     container.addChild(new Spacer(1));
     container.addChild(
       new Text(
