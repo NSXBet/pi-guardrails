@@ -4,7 +4,11 @@ import { createPermissionGateConfirmComponent } from "./prompt";
 
 type ConfirmResult = "allow" | "allow-session" | "deny" | "stop";
 
-function mount(command: string, description = "recursive delete") {
+function mount(
+  command: string,
+  description = "recursive delete",
+  meta?: { agentReason?: string; approvalId?: string },
+) {
   let captured: ConfirmResult | undefined;
   const done = (result: ConfirmResult) => {
     captured = result;
@@ -15,12 +19,11 @@ function mount(command: string, description = "recursive delete") {
     requestRender: vi.fn(),
   };
 
-  const component = createPermissionGateConfirmComponent(command, description)(
-    tui,
-    NOOP_THEME,
-    {},
-    done,
-  );
+  const component = createPermissionGateConfirmComponent(
+    command,
+    description,
+    meta,
+  )(tui, NOOP_THEME, {}, done);
 
   return {
     component,
@@ -70,6 +73,19 @@ describe("createPermissionGateConfirmComponent", () => {
     const { component, result } = mount("rm -rf /");
     component.handleInput("x");
     expect(result()).toBeUndefined();
+  });
+
+  it("renders agent reason and approval id when provided", () => {
+    const { component } = mount("rm -rf /", "recursive delete", {
+      agentReason: "cleaning throwaway build dir",
+      approvalId: "apr-123",
+    });
+    const rendered = component.render(80);
+    const output = Array.isArray(rendered)
+      ? rendered.join("\n")
+      : String(rendered);
+    expect(output).toContain("cleaning throwaway build dir");
+    expect(output).toContain("apr-123");
   });
 
   it("rendered footer contains the stop hint", () => {

@@ -55,13 +55,22 @@ Skip all confirmation prompts and auto-deny blocks for the session:
 /guardrails:yolo on
 /guardrails:yolo off
 /guardrails:yolo status
+/guardrails:yolo:on
+/guardrails:yolo:off
 ```
 
-Guidance still runs in yolo mode — the agent still receives guidance messages and must call `guardrails_run_anyway` to proceed. To make auto-deny patterns block even in yolo mode, set `permissionGate.yoloRespectAutoDeny: true` in your config.
+`/guardrails:yolo:on` and `/guardrails:yolo:off` are fixed-outcome aliases for scripting (no args to parse). Yolo mode can also be set at launch:
+
+```bash
+pi --guardrails-yolo=on
+GUARDRAILS_YOLO=on pi
+```
+
+Precedence: `--guardrails-yolo` flag > `GUARDRAILS_YOLO` env > `permissionGate.yolo` config. YOLO bypasses guidance, auto-deny blocks, and confirmation prompts. To keep auto-deny patterns active in YOLO mode, set `permissionGate.yoloRespectAutoDeny: true` in your config.
 
 ### `guardrails_run_anyway` tool
 
-Registered automatically by `permission-gate`. The agent calls this tool after reading a guidance message and deciding to proceed. It accepts the single-use id from the block message, resolves the stored command, and runs it through the full gate (auto-deny + user confirmation if dangerous).
+Registered automatically by `permission-gate`. The agent calls this tool after reading a guidance message and deciding to proceed. It accepts the single-use id from the block message and a required `reason` explaining why it's proceeding, resolves the stored command, and runs it through the full gate (auto-deny + user confirmation if dangerous). The reason is displayed above the command in the tool call UI.
 
 ### Config example
 

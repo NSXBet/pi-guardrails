@@ -124,6 +124,21 @@
         "permissionGate": {
           "type": "object",
           "properties": {
+            "sessionEscalation": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean",
+                  "description": "Offer a per-rule session grant after repeated approvals. Default true."
+                },
+                "approvalThreshold": {
+                  "type": "number",
+                  "description": "Positive number of approvals before offering a session grant. Default 2."
+                }
+              },
+              "additionalProperties": false,
+              "description": "Global session escalation for repeated successful guardrail approvals."
+            },
             "patterns": {
               "type": "array",
               "items": {
@@ -155,6 +170,14 @@
                 "$ref": "#/definitions/PatternConfig"
               },
               "description": "Command patterns that are always blocked without prompting."
+            },
+            "yolo": {
+              "type": "boolean",
+              "description": "Bypass all confirmation prompts and auto-deny blocks. Guidance patterns still run. Default false."
+            },
+            "yoloRespectAutoDeny": {
+              "type": "boolean",
+              "description": "When true, autoDenyPatterns still block even in yolo mode. Default false."
             }
           },
           "additionalProperties": false,

@@ -75,6 +75,18 @@ export function createGuardrailsConfigLoader(): GuardrailsConfigLoader {
         local?.permissionGate?.yoloRespectAutoDeny ??
         global?.permissionGate?.yoloRespectAutoDeny ??
         DEFAULT_CONFIG.permissionGate.yoloRespectAutoDeny;
+      resolved.permissionGate.sessionEscalation = {
+        enabled:
+          memory?.permissionGate?.sessionEscalation?.enabled ??
+          local?.permissionGate?.sessionEscalation?.enabled ??
+          global?.permissionGate?.sessionEscalation?.enabled ??
+          DEFAULT_CONFIG.permissionGate.sessionEscalation.enabled,
+        approvalThreshold:
+          memory?.permissionGate?.sessionEscalation?.approvalThreshold ??
+          local?.permissionGate?.sessionEscalation?.approvalThreshold ??
+          global?.permissionGate?.sessionEscalation?.approvalThreshold ??
+          DEFAULT_CONFIG.permissionGate.sessionEscalation.approvalThreshold,
+      };
 
       const mergedPaths = new Map<string, AllowedPath>();
       for (const paths of [

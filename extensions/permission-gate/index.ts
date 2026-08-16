@@ -1,13 +1,14 @@
 import { exec as nodeExec } from "node:child_process";
 import { promisify } from "node:util";
 import {
-  defineTool,
   type AgentToolResult,
+  defineTool,
   type ExtensionAPI,
+  type ExtensionContext,
   isToolCallEventType,
 } from "@earendil-works/pi-coding-agent";
-import { Type } from "@sinclair/typebox";
 import { Text } from "@earendil-works/pi-tui";
+import { Type } from "@sinclair/typebox";
 import { checkAction } from "../../src/core";
 import { configLoader } from "../../src/shared/config";
 import {
@@ -22,6 +23,10 @@ import {
   GUARDRAILS_PROMPT_OPENED_EVENT,
   setupLegacyPromptEventAlias,
 } from "../../src/shared/events";
+import {
+  recordSessionEscalationApproval,
+  sessionEscalation,
+} from "../session-escalation-prompt";
 import { isCommandAllowed, saveCommandSessionGrant } from "./grants";
 import { consumeApproval, issueApproval, peekApproval } from "./guidance";
 import { createPermissionGateConfirmComponent } from "./prompt";
@@ -33,40 +38,119 @@ import {
   matchGuidancePattern,
 } from "./rules";
 
+const YOLO_STATUS_KEY = "guardrails-yolo";
+
+function updateYoloStatus(
+  ctx: Pick<ExtensionContext, "ui">,
+  enabled: boolean,
+): void {
+  ctx.ui.setStatus(YOLO_STATUS_KEY, enabled ? "🛹" : undefined);
+}
+
+/** `--guardrails-yolo=on|off` CLI flag. Registered here (not env-only) so it shows in `--help`. */
+function envGuardrailsYolo(): boolean | null {
+  const v = process.env.GUARDRAILS_YOLO?.toLowerCase();
+  if (v === "1" || v === "true" || v === "yes" || v === "on") return true;
+  if (v === "0" || v === "false" || v === "no" || v === "off") return false;
+  return null;
+}
+
+async function setYolo(next: boolean): Promise<void> {
+  await configLoader.save("memory", { permissionGate: { yolo: next } });
+}
+
 export default async function permissionGate(pi: ExtensionAPI) {
   await configLoader.load();
 
-  pi.registerCommand("guardrails:yolo", {
-    description: "Toggle yolo mode (skip permission-gate prompts)",
-    handler: async (args, cmdCtx) => {
-      const pg = configLoader.getConfig().permissionGate;
-      const arg = args.trim().toLowerCase();
+  pi.registerFlag?.("guardrails-yolo", {
+    description: "Set guardrails yolo mode for this session: on|off",
+    type: "string",
+  });
 
-      if (arg === "" || arg === "status") {
+  pi.on("session_start", async (event, ctx) => {
+    if (event.reason !== "reload") sessionEscalation.reset();
+    const flag = pi.getFlag?.("guardrails-yolo");
+    const flagValue =
+      typeof flag === "string"
+        ? flag.toLowerCase() === "on"
+          ? true
+          : flag.toLowerCase() === "off"
+            ? false
+            : null
+        : null;
+    const next = flagValue ?? envGuardrailsYolo();
+    if (next === null) {
+      updateYoloStatus(ctx, configLoader.getConfig().permissionGate.yolo);
+      return;
+    }
+    await setYolo(next);
+    updateYoloStatus(ctx, next);
+    try {
+      ctx.ui.notify(
+        next
+          ? "[Guardrails] yolo mode ON (permission-gate prompts skipped)"
+          : "[Guardrails] yolo mode OFF",
+        "warning",
+      );
+    } catch {}
+  });
+
+  function registerYoloCommand(name: string) {
+    pi.registerCommand(name, {
+      description:
+        "Show yolo status or set it on/off. Usage: /guardrails:yolo [on|off]",
+      getArgumentCompletions: (prefix) => {
+        const commands = [
+          {
+            value: "on",
+            label: "on",
+            description: "Enable yolo mode",
+          },
+          {
+            value: "off",
+            label: "off",
+            description: "Disable yolo mode",
+          },
+        ];
+        return commands.filter((command) => command.value.startsWith(prefix));
+      },
+      handler: async (args, cmdCtx) => {
+        const pg = configLoader.getConfig().permissionGate;
+        const arg = args.trim().toLowerCase();
+
+        if (arg === "" || arg === "status") {
+          updateYoloStatus(cmdCtx, pg.yolo);
+          cmdCtx.ui.notify(
+            pg.yolo
+              ? "[Guardrails] yolo mode is on."
+              : "[Guardrails] yolo mode is off.",
+            "info",
+          );
+          return;
+        }
+
+        const next = arg === "on" ? true : arg === "off" ? false : null;
+        if (next === null) {
+          cmdCtx.ui.notify(
+            "[Guardrails] usage: /guardrails:yolo [on|off]",
+            "warning",
+          );
+          return;
+        }
+
+        await setYolo(next);
+        updateYoloStatus(cmdCtx, next);
         cmdCtx.ui.notify(
-          `${pg.yolo ? "🛹 " : ""}[Guardrails] yolo mode is ${pg.yolo ? "on" : "off"}.`,
+          next
+            ? "[Guardrails] yolo mode enabled for this session."
+            : "[Guardrails] yolo mode disabled for this session.",
           "info",
         );
-        return;
-      }
+      },
+    });
+  }
 
-      const next = arg === "on" ? true : arg === "off" ? false : null;
-      if (next === null) {
-        cmdCtx.ui.notify(
-          "[Guardrails] usage: /guardrails:yolo [on|off|status]",
-          "warning",
-        );
-        return;
-      }
-
-      await configLoader.save("memory", { permissionGate: { yolo: next } });
-      await configLoader.load();
-      cmdCtx.ui.notify(
-        `${next ? "🛹 " : ""}[Guardrails] yolo mode ${next ? "enabled" : "disabled"} for this session.`,
-        "info",
-      );
-    },
-  });
+  registerYoloCommand("guardrails:yolo");
 
   // Tool: model calls this after reading guidance and deciding to proceed.
   // Runs the stored command through the full gate (autoDeny + confirm prompt)
@@ -81,9 +165,10 @@ export default async function permissionGate(pi: ExtensionAPI) {
         "and dangerous-command confirmation still apply. " +
         "Call this only after reading the guidance message and deciding to proceed.",
       promptSnippet:
-        "guardrails_run_anyway({id}) — run a guidance-blocked command via tool call; user will still be prompted for dangerous commands.",
+        "guardrails_run_anyway({id, reason}) — run a guidance-blocked command via tool call; user will still be prompted for dangerous commands.",
       promptGuidelines: [
         "When a bash command is soft-blocked with guidance and you still want to run it, call guardrails_run_anyway with the id from the block message.",
+        "Always include a reason: a short explanation of why you are running the command anyway, so the user sees it above the command.",
         "If the guidance says to stop and ask the user, do that instead.",
         "Do not call guardrails_run_anyway with a made-up or reused id.",
       ],
@@ -91,19 +176,35 @@ export default async function permissionGate(pi: ExtensionAPI) {
         id: Type.String({
           description: "The approval id from the guidance block message.",
         }),
+        reason: Type.String({
+          description:
+            "Short explanation of why you are running this command anyway. Shown to the user above the command.",
+        }),
         command: Type.Optional(Type.String()),
       }),
       renderShell: "default",
-      renderCall({ command, id }, theme) {
+      renderCall({ command, id, reason }, theme) {
         const cmd = command ?? id;
-        const text = theme.fg("accent", "$") + " " + theme.fg("toolTitle", cmd);
-        return new Text(text, 0, 0);
+        const lines = [
+          reason ? theme.fg("dim", reason) : undefined,
+          `${theme.fg("accent", "$")} ${theme.fg("toolTitle", cmd)}`,
+        ].filter((line): line is string => Boolean(line));
+        return new Text(lines.join("\n"), 0, 0);
       },
       prepareArguments(args: unknown) {
-        const id = typeof args === "string" ? args : (args as { id: string }).id;
-        return { id, command: peekApproval(id) ?? undefined };
+        const { id, reason } =
+          typeof args === "string"
+            ? { id: args, reason: "" }
+            : (args as { id: string; reason: string });
+        return { id, reason, command: peekApproval(id) ?? undefined };
       },
-      async execute(_toolCallId, { id, command: storedCommand }, signal, _onUpdate, ctx) {
+      async execute(
+        _toolCallId,
+        { id, reason: agentReason, command: storedCommand },
+        signal,
+        _onUpdate,
+        ctx,
+      ) {
         const command = consumeApproval(id) ?? storedCommand;
         if (!command) {
           return textResult(
@@ -120,10 +221,7 @@ export default async function permissionGate(pi: ExtensionAPI) {
         };
 
         // autoDeny: always blocks, even in yolo (matches yoloRespectAutoDeny semantics).
-        const autoDenyMatch = matchCommandPattern(
-          command,
-          pg.autoDenyPatterns,
-        );
+        const autoDenyMatch = matchCommandPattern(command, pg.autoDenyPatterns);
         if (autoDenyMatch) {
           const reason = formatAutoDenyReason(autoDenyMatch);
           emitActionBlocked(pi, {
@@ -150,6 +248,12 @@ export default async function permissionGate(pi: ExtensionAPI) {
         ]);
 
         if (safety.kind === "safe") {
+          return runCommand(command, ctx.cwd, signal);
+        }
+
+        const escalationRule = `permission-gate.dangerous-command:${safety.metadata.pattern}`;
+        sessionEscalation.configure(pg.sessionEscalation);
+        if (sessionEscalation.isGranted(escalationRule)) {
           return runCommand(command, ctx.cwd, signal);
         }
 
@@ -192,7 +296,10 @@ export default async function permissionGate(pi: ExtensionAPI) {
         let result: ConfirmResult;
         try {
           const customResult = await ctx.ui.custom<ConfirmResult>(
-            createPermissionGateConfirmComponent(command, safety.reason),
+            createPermissionGateConfirmComponent(command, safety.reason, {
+              agentReason,
+              approvalId: id,
+            }),
           );
           if (customResult === undefined) {
             const selection = await ctx.ui.select(
@@ -200,7 +307,8 @@ export default async function permissionGate(pi: ExtensionAPI) {
               ["Allow once", "Allow for session", "Deny", "Decline and stop"],
             );
             if (selection === "Allow once") result = "allow";
-            else if (selection === "Allow for session") result = "allow-session";
+            else if (selection === "Allow for session")
+              result = "allow-session";
             else if (selection === "Decline and stop") result = "stop";
             else result = "deny";
           } else {
@@ -241,6 +349,12 @@ export default async function permissionGate(pi: ExtensionAPI) {
         if (result === "allow-session") {
           await saveCommandSessionGrant(command);
         }
+        await recordSessionEscalationApproval(
+          ctx,
+          escalationRule,
+          pg.sessionEscalation,
+          "dangerous-command",
+        );
 
         return runCommand(command, ctx.cwd, signal);
       },
@@ -264,7 +378,7 @@ export default async function permissionGate(pi: ExtensionAPI) {
       "",
       "## Guardrails guidance",
       "Some commands are gated by a guidance rule. When one is blocked you will receive a message explaining the concern, ending with a single-use id.",
-      "To proceed: read the guidance carefully. If you still want to run the command, call the guardrails_run_anyway tool with the id from the block message. The id is single-use and expires after a few minutes.",
+      "To proceed: read the guidance carefully. If you still want to run the command, call the guardrails_run_anyway tool with the id from the block message and a reason explaining why you are proceeding. The id is single-use and expires after a few minutes.",
       "The command will still go through normal guardrails — if it is dangerous the user will be prompted to allow or deny it.",
       "If the guidance says to stop and ask the user, do that instead of calling guardrails_run_anyway.",
       "Do not call guardrails_run_anyway with a made-up or reused id.",
@@ -284,25 +398,27 @@ export default async function permissionGate(pi: ExtensionAPI) {
 
     const pg = config.permissionGate;
 
-    // Guidance soft-block. Always runs, including yolo. Issues a single-use id
-    // the model can pass to guardrails_run_anyway to proceed.
-    const guidancePatterns = collectGuidancePatterns(configLoader);
-    const guidanceMatch = matchGuidancePattern(command, guidancePatterns);
-    if (guidanceMatch) {
-      const freshId = issueApproval(command);
-      const reason =
-        `${guidanceMatch.description.trim()}\n` +
-        `To run this anyway, call the guardrails_run_anyway tool with id: ${freshId}`;
+    // Guidance soft-block. YOLO bypasses guidance along with permission prompts.
+    // When enabled, yoloRespectAutoDeny below still decides whether auto-deny runs.
+    if (!pg.yolo) {
+      const guidancePatterns = collectGuidancePatterns(configLoader);
+      const guidanceMatch = matchGuidancePattern(command, guidancePatterns);
+      if (guidanceMatch) {
+        const freshId = issueApproval(command);
+        const reason =
+          `${guidanceMatch.description.trim()}\n\n` +
+          `To run this anyway, call the tool: guardrails_run_anyway(id: "${freshId}", reason: "<short explanation of why you are proceeding>")`;
 
-      emitActionBlocked(pi, {
-        feature: "permissionGate",
-        action,
-        reason,
-        block: { source: "permission", metadata: guidanceMatch },
-        context: { toolName: "bash", input: event.input },
-      });
+        emitActionBlocked(pi, {
+          feature: "permissionGate",
+          action,
+          reason,
+          block: { source: "permission", metadata: guidanceMatch },
+          context: { toolName: "bash", input: event.input },
+        });
 
-      return { block: true, reason };
+        return { block: true, reason };
+      }
     }
 
     // Yolo: skip autoDeny and confirmation prompts.
@@ -335,12 +451,15 @@ export default async function permissionGate(pi: ExtensionAPI) {
     ]);
     if (safety.kind === "safe") return;
 
+    const escalationRule = `permission-gate.dangerous-command:${safety.metadata.pattern}`;
+    sessionEscalation.configure(pg.sessionEscalation);
+    if (sessionEscalation.isGranted(escalationRule)) return;
+
     emitRiskDetected(pi, {
       feature: "permissionGate",
       risk: safety,
       context: { toolName: "bash", input: event.input },
     });
-
     if (!config.permissionGate.requireConfirmation) {
       ctx.ui.notify(`Dangerous command detected: ${safety.reason}`, "warning");
       return;
@@ -392,9 +511,23 @@ export default async function permissionGate(pi: ExtensionAPI) {
       );
     }
 
-    if (result === "allow") return;
+    if (result === "allow") {
+      await recordSessionEscalationApproval(
+        ctx,
+        escalationRule,
+        pg.sessionEscalation,
+        "dangerous-command",
+      );
+      return;
+    }
     if (result === "allow-session") {
       await saveCommandSessionGrant(command);
+      await recordSessionEscalationApproval(
+        ctx,
+        escalationRule,
+        pg.sessionEscalation,
+        "dangerous-command",
+      );
       return;
     }
 

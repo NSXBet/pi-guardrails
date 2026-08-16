@@ -117,6 +117,13 @@ export interface GuardrailsConfig {
   };
   /** Dangerous bash command detection and confirmation settings. */
   permissionGate?: {
+    /** Global session escalation for repeated successful guardrail approvals. */
+    sessionEscalation?: {
+      /** Offer a per-rule session grant after repeated approvals. Default true. */
+      enabled?: boolean;
+      /** Positive number of approvals before offering a session grant. Default 2. */
+      approvalThreshold?: number;
+    };
     /** Additional dangerous command patterns. */
     patterns?: DangerousPattern[];
     /** If set, replaces the default dangerous command patterns entirely. */
@@ -168,5 +175,9 @@ export interface ResolvedConfig {
     autoDenyPatterns: PatternConfig[];
     yolo: boolean;
     yoloRespectAutoDeny: boolean;
+    sessionEscalation: {
+      enabled: boolean;
+      approvalThreshold: number;
+    };
   };
 }

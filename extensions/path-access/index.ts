@@ -28,6 +28,10 @@ import {
   resolveAllowedPaths,
 } from "./grants";
 import { createPathAccessPromptComponent, type PromptResult } from "./prompt";
+import {
+  recordSessionEscalationApproval,
+  sessionEscalation,
+} from "../session-escalation-prompt";
 import { createPathAccessRule } from "./rules";
 import { targetsForTool } from "./targets";
 
@@ -97,6 +101,12 @@ export default async function pathAccess(pi: ExtensionAPI) {
       const safety = await checkAction(action, [createPathAccessRule(state)]);
       if (safety.kind === "safe") continue;
 
+      const escalationRule = "path-access.outside-workspace";
+      sessionEscalation.configure(
+        config.permissionGate?.sessionEscalation,
+      );
+      if (sessionEscalation.isGranted(escalationRule)) continue;
+
       if (config.pathAccess.mode === "block" || !ctx.hasUI) {
         emitActionBlocked(pi, {
           feature: "pathAccess",
@@ -146,6 +156,12 @@ export default async function pathAccess(pi: ExtensionAPI) {
       }
 
       if (result === "allow-file-once" || result === "allow-dir-once") {
+        await recordSessionEscalationApproval(
+          ctx,
+          escalationRule,
+          config.permissionGate?.sessionEscalation,
+          "confirmation",
+        );
         continue;
       }
 
@@ -157,6 +173,12 @@ export default async function pathAccess(pi: ExtensionAPI) {
         );
         acceptedGrants.push(grant);
         await persistGrant(grant);
+        await recordSessionEscalationApproval(
+          ctx,
+          escalationRule,
+          config.permissionGate?.sessionEscalation,
+          "confirmation",
+        );
         continue;
       }
 
@@ -176,6 +198,12 @@ export default async function pathAccess(pi: ExtensionAPI) {
         );
         acceptedGrants.push(grant);
         await persistGrant(grant);
+        await recordSessionEscalationApproval(
+          ctx,
+          escalationRule,
+          config.permissionGate?.sessionEscalation,
+          "confirmation",
+        );
         continue;
       }
 
