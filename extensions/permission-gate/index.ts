@@ -39,6 +39,23 @@ import {
 } from "./rules";
 
 const YOLO_STATUS_KEY = "guardrails-yolo";
+const YOLO_SESSION_STATE_KEY = "__PI_GUARDRAILS_YOLO_SESSION__";
+
+type YoloSessionState = { enabled: boolean };
+
+function getYoloSessionState(): YoloSessionState | undefined {
+  return (globalThis as Record<string, unknown>)[YOLO_SESSION_STATE_KEY] as
+    | YoloSessionState
+    | undefined;
+}
+
+function setYoloSessionState(enabled: boolean): void {
+  (globalThis as Record<string, unknown>)[YOLO_SESSION_STATE_KEY] = { enabled };
+}
+
+function clearYoloSessionState(): void {
+  delete (globalThis as Record<string, unknown>)[YOLO_SESSION_STATE_KEY];
+}
 
 function updateYoloStatus(
   ctx: Pick<ExtensionContext, "ui">,
@@ -55,7 +72,11 @@ function envGuardrailsYolo(): boolean | null {
   return null;
 }
 
-async function setYolo(next: boolean): Promise<void> {
+async function setYolo(
+  next: boolean,
+  persistAcrossReload = false,
+): Promise<void> {
+  if (persistAcrossReload) setYoloSessionState(next);
   await configLoader.save("memory", { permissionGate: { yolo: next } });
 }
 
@@ -68,7 +89,10 @@ export default async function permissionGate(pi: ExtensionAPI) {
   });
 
   pi.on("session_start", async (event, ctx) => {
-    if (event.reason !== "reload") sessionEscalation.reset();
+    if (event.reason !== "reload") {
+      sessionEscalation.reset();
+      clearYoloSessionState();
+    }
     const flag = pi.getFlag?.("guardrails-yolo");
     const flagValue =
       typeof flag === "string"
@@ -78,7 +102,12 @@ export default async function permissionGate(pi: ExtensionAPI) {
             ? false
             : null
         : null;
-    const next = flagValue ?? envGuardrailsYolo();
+    const next =
+      flagValue ??
+      envGuardrailsYolo() ??
+      (event.reason === "reload"
+        ? (getYoloSessionState()?.enabled ?? null)
+        : null);
     if (next === null) {
       updateYoloStatus(ctx, configLoader.getConfig().permissionGate.yolo);
       return;
@@ -138,7 +167,7 @@ export default async function permissionGate(pi: ExtensionAPI) {
           return;
         }
 
-        await setYolo(next);
+        await setYolo(next, true);
         updateYoloStatus(cmdCtx, next);
         cmdCtx.ui.notify(
           next

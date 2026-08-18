@@ -173,7 +173,7 @@
             },
             "yolo": {
               "type": "boolean",
-              "description": "Bypass all confirmation prompts and auto-deny blocks. Guidance patterns still run. Default false."
+              "description": "Bypass guidance, confirmation prompts, and auto-deny blocks. Default false."
             },
             "yoloRespectAutoDeny": {
               "type": "boolean",

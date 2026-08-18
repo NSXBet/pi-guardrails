@@ -117,14 +117,34 @@ const DANGEROUS_EVENT = {
   input: { command: "dangerous-cmd" },
 } satisfies BashToolCallEvent;
 
+const KUBECTL_EXEC_EVENT = {
+  type: "tool_call",
+  toolCallId: "kubectl-exec-call",
+  toolName: "bash",
+  input: {
+    command: "kubectl exec -n hermes statefulset/hermes -- sh -c 'echo ok'",
+  },
+} satisfies BashToolCallEvent;
+
+const YOLO_SESSION_STATE_KEY = "__PI_GUARDRAILS_YOLO_SESSION__";
+
+function clearYoloSessionState(): void {
+  delete (globalThis as Record<string, unknown>)[YOLO_SESSION_STATE_KEY];
+}
+
 describe("permissionGate extension hook", () => {
   let pi: DeepMocked<ExtensionAPI>;
   let toolCallHandler: ToolCallHandler | undefined;
 
   beforeEach(async () => {
+    clearYoloSessionState();
     pi = createMock<ExtensionAPI>();
     await permissionGate(pi);
     toolCallHandler = registeredToolCallHandler(pi);
+  });
+
+  afterEach(() => {
+    clearYoloSessionState();
   });
 
   it("registers the permissionGate feature on request", async () => {
@@ -322,6 +342,24 @@ describe("permissionGate extension hook", () => {
       expect(ctx.ui.select).not.toHaveBeenCalled();
     });
 
+    it("skips the confirmation prompt for kubectl exec", async () => {
+      assert(toolCallHandler, "tool_call handler should be registered");
+      setPermissionGate({
+        yolo: true,
+        patterns: [
+          { pattern: "kubectl exec", description: "container execution" },
+        ],
+        useBuiltinMatchers: false,
+      });
+
+      const ctx = createCtx();
+      const result = await toolCallHandler(KUBECTL_EXEC_EVENT, ctx);
+
+      expect(result).toBeUndefined();
+      expect(ctx.ui.custom).not.toHaveBeenCalled();
+      expect(ctx.ui.select).not.toHaveBeenCalled();
+    });
+
     it("bypasses autoDeny when yoloRespectAutoDeny is false", async () => {
       assert(toolCallHandler, "tool_call handler should be registered");
       setPermissionGate({
@@ -394,6 +432,26 @@ describe("permissionGate extension hook", () => {
       await command.handler("on", createCtx());
 
       expect(configModule.configLoader.load).toHaveBeenCalledTimes(1);
+    });
+
+    it("restores slash-command yolo after reload", async () => {
+      const command = registeredCommand("guardrails:yolo");
+      assert(command, "guardrails:yolo should be registered");
+      const sessionStartCall = (pi.on.mock.calls as unknown[][]).find(
+        ([event]) => event === "session_start",
+      );
+      const sessionStart = sessionStartCall?.[1] as
+        | ExtensionHandler<never, unknown>
+        | undefined;
+      assert(sessionStart, "session_start handler should be registered");
+
+      await command.handler("on", createCtx());
+      vi.mocked(configModule.configLoader.save).mockClear();
+      await sessionStart({ reason: "reload" } as never, createCtx());
+
+      expect(configModule.configLoader.save).toHaveBeenCalledWith("memory", {
+        permissionGate: { yolo: true },
+      });
     });
 
     it("disables yolo with /guardrails:yolo off", async () => {

@@ -135,8 +135,8 @@ export interface GuardrailsConfig {
     /** Command patterns that are always blocked without prompting. */
     autoDenyPatterns?: PatternConfig[];
     /**
-     * Bypass all confirmation prompts and auto-deny blocks. Guidance patterns
-     * still run. Default false.
+     * Bypass guidance, confirmation prompts, and auto-deny blocks.
+     * Default false.
      */
     yolo?: boolean;
     /** When true, autoDenyPatterns still block even in yolo mode. Default false. */
