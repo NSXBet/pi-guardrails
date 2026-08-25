@@ -5,7 +5,7 @@ description: "Builds new pi-guardrails feature extensions using the core/shared 
 
 # Building Guardrails Extensions
 
-Use this when adding a new feature extension to `@aliou/pi-guardrails`.
+Use this when adding a new feature extension to `@yurifrl/pi-guardrails`.
 
 ## Architecture rules
 

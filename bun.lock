@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "@aliou/pi-guardrails",
+      "name": "@yurifrl/pi-guardrails",
       "dependencies": {
         "@aliou/pi-utils-settings": "^0.19.1",
         "@aliou/sh": "^0.2.2",
