@@ -146,6 +146,42 @@ describe("permissionGate extension hook", () => {
   afterEach(() => {
     clearYoloSessionState();
   });
+  it("uses the host executor for approved commands when available", async () => {
+    const exec = vi.fn().mockResolvedValue({
+      code: 0,
+      stdout: "stash@{0}: WIP",
+      stderr: "",
+    });
+    pi = createMock<ExtensionAPI>({ exec } as never);
+    await permissionGate(pi);
+
+    const tool = pi.registerTool.mock.calls.find(
+      ([definition]) => definition.name === "guardrails_run_anyway",
+    )?.[0] as {
+      execute: (
+        id: string,
+        args: { id: string; reason: string; command?: string },
+        signal: AbortSignal | undefined,
+        onUpdate: undefined,
+        ctx: ExtensionContext,
+      ) => Promise<{ content: Array<{ text: string }> }>;
+    };
+    assert(tool, "guardrails_run_anyway should be registered");
+
+    const result = await tool.execute(
+      "tool-call",
+      { id: "missing", reason: "inspect stashes", command: "git stash list" },
+      undefined,
+      undefined,
+      createCtx({ cwd: "/work/project" }),
+    );
+
+    expect(exec).toHaveBeenCalledWith("sh", ["-lc", "git stash list"], {
+      cwd: "/work/project",
+      signal: undefined,
+    });
+    expect(result.content[0]?.text).toBe("stash@{0}: WIP");
+  });
 
   it("registers the permissionGate feature on request", async () => {
     const registration = pi.events.on.mock.calls.find(
