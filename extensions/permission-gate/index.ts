@@ -81,6 +81,7 @@ async function setYolo(
 }
 
 export default async function permissionGate(pi: ExtensionAPI) {
+  const runApprovedCommand = createCommandRunner(pi);
   await configLoader.load();
 
   pi.registerFlag?.("guardrails-yolo", {
@@ -265,7 +266,7 @@ export default async function permissionGate(pi: ExtensionAPI) {
 
         // Yolo: skip the confirm prompt, just run.
         if (pg.yolo) {
-          return runCommand(command, ctx.cwd, signal);
+          return runApprovedCommand(command, ctx.cwd, signal);
         }
 
         // Dangerous command check + confirm prompt.
@@ -277,13 +278,13 @@ export default async function permissionGate(pi: ExtensionAPI) {
         ]);
 
         if (safety.kind === "safe") {
-          return runCommand(command, ctx.cwd, signal);
+          return runApprovedCommand(command, ctx.cwd, signal);
         }
 
         const escalationRule = `permission-gate.dangerous-command:${safety.metadata.pattern}`;
         sessionEscalation.configure(pg.sessionEscalation);
         if (sessionEscalation.isGranted(escalationRule)) {
-          return runCommand(command, ctx.cwd, signal);
+          return runApprovedCommand(command, ctx.cwd, signal);
         }
 
         emitRiskDetected(pi, {
@@ -297,7 +298,7 @@ export default async function permissionGate(pi: ExtensionAPI) {
             `Dangerous command detected: ${safety.reason}`,
             "warning",
           );
-          return runCommand(command, ctx.cwd, signal);
+          return runApprovedCommand(command, ctx.cwd, signal);
         }
 
         if (!ctx.hasUI) {
@@ -385,7 +386,7 @@ export default async function permissionGate(pi: ExtensionAPI) {
           "dangerous-command",
         );
 
-        return runCommand(command, ctx.cwd, signal);
+        return runApprovedCommand(command, ctx.cwd, signal);
       },
     }),
   );
@@ -590,6 +591,38 @@ const execAsync = promisify(nodeExec);
 function textResult(text: string): AgentToolResult<null> {
   return { content: [{ type: "text", text }], details: null };
 }
+
+interface OmpExecResult {
+  code: number;
+  stdout: string;
+  stderr: string;
+}
+
+interface OmpExtensionApi {
+  exec?: (
+    command: string,
+    args: string[],
+    options: { cwd: string; signal?: AbortSignal },
+  ) => Promise<OmpExecResult>;
+}
+
+function createCommandRunner(pi: ExtensionAPI) {
+  const ompExec = (pi as unknown as OmpExtensionApi).exec;
+
+  if (typeof ompExec === "function") {
+    return async (
+      command: string,
+      cwd: string,
+      signal: AbortSignal | undefined,
+    ): Promise<AgentToolResult<null>> => {
+      const result = await ompExec("sh", ["-lc", command], { cwd, signal });
+      return textResult([result.stdout, result.stderr].filter(Boolean).join("\n") || "(no output)");
+    };
+  }
+
+  return runCommand;
+}
+
 
 async function runCommand(
   command: string,
