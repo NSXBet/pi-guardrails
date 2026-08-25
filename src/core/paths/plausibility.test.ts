@@ -15,7 +15,7 @@ describe("hasNonPathShape", () => {
     "s3://bucket/key",
     "file://localhost/etc/passwd",
     "deploy@host:/etc/passwd",
-    "git@github.com:aliou/pi-guardrails.git",
+    "git@github.com:yurifrl/pi-guardrails.git",
     "./...",
     "./pkg/...",
     "github.com/user/repo/...",

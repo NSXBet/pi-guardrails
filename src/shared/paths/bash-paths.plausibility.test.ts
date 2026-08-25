@@ -49,7 +49,7 @@ describe("outside-workspace plausibility filter", () => {
       ['pnpm exec ctx7 docs /websites/apisix "routes"', "pnpm exec"],
       ['yarn dlx ctx7 docs /websites/apisix "routes"', "yarn dlx"],
       ['uvx ctx7 docs /websites/apisix "routes"', "uvx"],
-      ["ctx7 skills install /aliou/pi-guardrails", "skills install"],
+      ["ctx7 skills install /yurifrl/pi-guardrails", "skills install"],
     ])("ignores the library id in %s (%s)", async (command) => {
       expect(await extract(command)).toEqual([]);
     });
@@ -87,7 +87,7 @@ describe("outside-workspace plausibility filter", () => {
   describe("other identifier-shaped arguments", () => {
     it("ignores owner/repo slugs", async () => {
       expect(
-        await extract("gh pr view 12 --repo /aliou/pi-guardrails"),
+        await extract("gh pr view 12 --repo /yurifrl/pi-guardrails"),
       ).toEqual([]);
     });
 
@@ -108,7 +108,7 @@ describe("outside-workspace plausibility filter", () => {
 
     it("ignores git ssh remotes", async () => {
       expect(
-        await extract("git clone git@github.com:aliou/pi-guardrails.git"),
+        await extract("git clone git@github.com:yurifrl/pi-guardrails.git"),
       ).toEqual([]);
     });
   });
@@ -148,8 +148,8 @@ describe("outside-workspace plausibility filter", () => {
     it.each([
       ["kubectl logs pod/api-server-1", ["/work/project/pod/api-server-1"]],
       [
-        "gh pr view 12 --repo aliou/pi-guardrails",
-        ["/work/project/aliou/pi-guardrails"],
+        "gh pr view 12 --repo yurifrl/pi-guardrails",
+        ["/work/project/yurifrl/pi-guardrails"],
       ],
     ])("%s", async (command, expected) => {
       expect(await extract(command)).toEqual(expected);

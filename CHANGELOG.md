@@ -1,4 +1,4 @@
-# @aliou/pi-guardrails
+# @yurifrl/pi-guardrails
 
 ## 0.17.1
 
