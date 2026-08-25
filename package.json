@@ -23,6 +23,12 @@
       "./extensions/herdr/index.ts"
     ]
   },
+  "omp": {
+    "extensions": [
+      "./extensions/guardrails/index.ts",
+      "./extensions/permission-gate/index.ts"
+    ]
+  },
   "publishConfig": {
     "access": "public"
   },
