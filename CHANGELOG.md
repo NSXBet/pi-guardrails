@@ -69,6 +69,12 @@
   indirection is "known to be unsolvable in the most general case" — unresolved
   references are treated conservatively rather than optimistically.
 
+## Unreleased
+
+### Patch Changes
+
+- Make permission-gate YOLO reliably bypass guidance and confirmations: preserve slash-command activation across `/reload` in the active Pi process, retain its config-memory override, and cover `kubectl exec` explicitly. Update the public config schema to match YOLO behavior.
+
 ## 0.16.2
 
 ### Patch Changes
