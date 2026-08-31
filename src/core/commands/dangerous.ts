@@ -11,6 +11,12 @@ import { walkCommands, wordToString } from "../shell/ast";
 
 export type StructuralMatcher = (words: string[]) => string | undefined;
 
+export interface NamedStructuralMatcher {
+  /** Stable identifier for this dangerous-command group (e.g. "rm -rf", "sudo"). */
+  name: string;
+  match: StructuralMatcher;
+}
+
 export interface CommandPattern {
   pattern: string;
   description?: string;
@@ -301,34 +307,30 @@ const containerMatcher: StructuralMatcher = (words) => {
 // Matcher Registry
 // =============================================================================
 
-/**
- * All built-in dangerous command matchers.
- * Order matters - earlier matchers take precedence if multiple match.
- */
-export const BUILTIN_MATCHERS: StructuralMatcher[] = [
+export const BUILTIN_MATCHERS: NamedStructuralMatcher[] = [
   // Destruction (highest priority)
-  rmMatcher,
-  shredMatcher,
+  { name: "rm -rf", match: rmMatcher },
+  { name: "shred", match: shredMatcher },
 
   // Privilege escalation
-  sudoMatcher,
-  doasMatcher,
-  pkexecMatcher,
+  { name: "sudo", match: sudoMatcher },
+  { name: "doas", match: doasMatcher },
+  { name: "pkexec", match: pkexecMatcher },
 
   // Disk/filesystem operations
-  ddMatcher,
-  mkfsMatcher,
-  wipefsMatcher,
-  blkdiscardMatcher,
-  fdiskMatcher,
-  partedMatcher,
+  { name: "dd of=", match: ddMatcher },
+  { name: "mkfs.", match: mkfsMatcher },
+  { name: "wipefs", match: wipefsMatcher },
+  { name: "blkdiscard", match: blkdiscardMatcher },
+  { name: "fdisk", match: fdiskMatcher },
+  { name: "parted", match: partedMatcher },
 
   // Permission changes
-  chmodMatcher,
-  chownMatcher,
+  { name: "chmod -R 777", match: chmodMatcher },
+  { name: "chown -R", match: chownMatcher },
 
   // Container escapes
-  containerMatcher,
+  { name: "docker run --privileged", match: containerMatcher },
 ];
 
 /**
@@ -359,12 +361,11 @@ export const BUILTIN_KEYWORD_PATTERNS = new Set([
 export function matchDangerousCommand(
   words: string[],
 ): DangerousCommandMatch | undefined {
-  for (const matcher of BUILTIN_MATCHERS) {
-    const description = matcher(words);
+  for (const { name, match } of BUILTIN_MATCHERS) {
+    const description = match(words);
     if (description) {
-      // Use the command itself as the pattern identifier
-      const pattern = words[0] ?? "unknown";
-      return { description, pattern };
+      // Use the command family name as the pattern identifier
+      return { description, pattern: name };
     }
   }
   return undefined;
@@ -398,13 +399,12 @@ function matchBuiltinDangerous(
   words: string[],
 ): DangerousCommandMatch | undefined {
   if (words.length === 0) return undefined;
-  for (const matcher of BUILTIN_MATCHERS) {
-    const description = matcher(words);
-    if (description) return { description, pattern: "(structural)" };
+  for (const { name, match } of BUILTIN_MATCHERS) {
+    const description = match(words);
+    if (description) return { description, pattern: name };
   }
   return undefined;
 }
-
 export function checkDangerousCommand({
   command,
   patterns,

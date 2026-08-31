@@ -11,8 +11,8 @@ import {
  * Returns the first match description, or undefined if none match.
  */
 function findMatch(words: string[]): string | undefined {
-  for (const matcher of BUILTIN_MATCHERS) {
-    const result = matcher(words);
+  for (const { match } of BUILTIN_MATCHERS) {
+    const result = match(words);
     if (result) return result;
   }
   return undefined;
@@ -347,7 +347,7 @@ describe("checkDangerousCommand", () => {
 
     expect(result).toEqual({
       description: "recursive force delete",
-      pattern: "(structural)",
+      pattern: "rm -rf",
     });
   });
 
@@ -477,7 +477,7 @@ describe("checkDangerousCommand", () => {
       fallbackPatterns: [],
     });
 
-    expect(result).toEqual({ description, pattern: "(structural)" });
+    expect(result).toEqual({ description, pattern: "sudo" });
   });
 });
 
@@ -488,6 +488,26 @@ describe("matchDangerousCommand", () => {
       description: "superuser command",
       pattern: "sudo",
     });
+  });
+
+  it("groups structural matches by command family, not one shared bucket", () => {
+    const matchPattern = (command: string): string => {
+      const result = checkDangerousCommand({
+        command,
+        patterns: [],
+        useBuiltinMatchers: true,
+        fallbackPatterns: [],
+      });
+      if (!result) throw new Error(`expected match for ${command}`);
+      return result.pattern;
+    };
+
+    // Different command families must escalate separately.
+    expect(matchPattern("sudo apt update")).not.toBe(
+      matchPattern("rm -rf /tmp/example"),
+    );
+    expect(matchPattern("sudo apt update")).toBe("sudo");
+    expect(matchPattern("rm -rf /tmp/example")).toBe("rm -rf");
   });
 
   it("returns undefined for safe commands", () => {
