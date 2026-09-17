@@ -1,6 +1,6 @@
 {
-  "name": "@yurifrl/pi-guardrails",
-  "version": "0.17.1",
+  "name": "@aliou/pi-guardrails",
+  "version": "0.18.0",
   "license": "MIT",
   "type": "module",
   "private": false,
