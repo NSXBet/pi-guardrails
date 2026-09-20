@@ -528,6 +528,7 @@ describe("permissionGate extension hook", () => {
 
       await command.handler("status", ctx);
 
+      // biome-ignore lint/plugin/no-emojis: deliberate skater marker for active YOLO mode
       expect(ctx.ui.setStatus).toHaveBeenCalledWith("guardrails-yolo", "🛹");
     });
 

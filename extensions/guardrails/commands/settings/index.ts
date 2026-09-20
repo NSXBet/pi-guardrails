@@ -22,8 +22,8 @@ import type {
   ResolvedConfig,
 } from "../../../../src/shared/config";
 import { configLoader } from "../../../../src/shared/config";
-import { sessionEscalation } from "../../../session-escalation-prompt";
 import type { GuardrailsFeatureId } from "../../../../src/shared/events";
+import { sessionEscalation } from "../../../session-escalation-prompt";
 import { PatternEditor } from "../../components/pattern-editor";
 import { AddRuleSubmenu } from "./add-rule-wizard";
 import { PathListEditor } from "./path-list-editor";
@@ -570,7 +570,8 @@ export function registerGuardrailsSettings(
               description:
                 "Offer a per-rule session grant after repeated successful approvals",
               currentValue:
-                scopedConfig.permissionGate?.sessionEscalation?.enabled === undefined
+                scopedConfig.permissionGate?.sessionEscalation?.enabled ===
+                undefined
                   ? `inherited: ${resolved.permissionGate.sessionEscalation.enabled ? "on" : "off"}`
                   : scopedConfig.permissionGate.sessionEscalation.enabled
                     ? "on"
@@ -580,9 +581,11 @@ export function registerGuardrailsSettings(
             {
               id: "permissionGate.sessionEscalation.approvalThreshold",
               label: "Session escalation threshold",
-              description: "Successful approvals before offering a session grant",
+              description:
+                "Successful approvals before offering a session grant",
               currentValue: String(
-                scopedConfig.permissionGate?.sessionEscalation?.approvalThreshold ??
+                scopedConfig.permissionGate?.sessionEscalation
+                  ?.approvalThreshold ??
                   resolved.permissionGate.sessionEscalation.approvalThreshold,
               ),
               values: ["1", "2", "3", "4", "5"],
@@ -590,7 +593,8 @@ export function registerGuardrailsSettings(
             {
               id: "permissionGate.sessionEscalation.reset",
               label: "Reset session escalation state",
-              description: "Clear all current-session approval counts, grants, and dismissals",
+              description:
+                "Clear all current-session approval counts, grants, and dismissals",
               currentValue: "reset",
               values: ["reset"],
             },
