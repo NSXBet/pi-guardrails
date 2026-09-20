@@ -18,6 +18,10 @@ import {
   GUARDRAILS_PROMPT_OPENED_EVENT,
   setupLegacyPromptEventAlias,
 } from "../../src/shared/events";
+import {
+  recordSessionEscalationApproval,
+  sessionEscalation,
+} from "../session-escalation-prompt";
 import { piDocumentationPaths } from "./dynamic-resources";
 import {
   createPendingGrant,
@@ -28,10 +32,6 @@ import {
   resolveAllowedPaths,
 } from "./grants";
 import { createPathAccessPromptComponent, type PromptResult } from "./prompt";
-import {
-  recordSessionEscalationApproval,
-  sessionEscalation,
-} from "../session-escalation-prompt";
 import { createPathAccessRule } from "./rules";
 import { targetsForTool } from "./targets";
 
@@ -102,9 +102,7 @@ export default async function pathAccess(pi: ExtensionAPI) {
       if (safety.kind === "safe") continue;
 
       const escalationRule = "path-access.outside-workspace";
-      sessionEscalation.configure(
-        config.permissionGate?.sessionEscalation,
-      );
+      sessionEscalation.configure(config.permissionGate?.sessionEscalation);
       if (sessionEscalation.isGranted(escalationRule)) continue;
 
       if (config.pathAccess.mode === "block" || !ctx.hasUI) {

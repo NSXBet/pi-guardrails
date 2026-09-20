@@ -61,6 +61,7 @@ function updateYoloStatus(
   ctx: Pick<ExtensionContext, "ui">,
   enabled: boolean,
 ): void {
+  // biome-ignore lint/plugin/no-emojis: deliberate skater marker for active YOLO mode
   ctx.ui.setStatus(YOLO_STATUS_KEY, enabled ? "🛹" : undefined);
 }
 
@@ -616,13 +617,15 @@ function createCommandRunner(pi: ExtensionAPI) {
       signal: AbortSignal | undefined,
     ): Promise<AgentToolResult<null>> => {
       const result = await ompExec("sh", ["-lc", command], { cwd, signal });
-      return textResult([result.stdout, result.stderr].filter(Boolean).join("\n") || "(no output)");
+      return textResult(
+        [result.stdout, result.stderr].filter(Boolean).join("\n") ||
+          "(no output)",
+      );
     };
   }
 
   return runCommand;
 }
-
 
 async function runCommand(
   command: string,

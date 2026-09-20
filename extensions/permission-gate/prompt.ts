@@ -115,7 +115,9 @@ export function createPermissionGateConfirmComponent(
     container.addChild(
       new Text(
         theme.fg("error", theme.bold("Dangerous Command Detected")) +
-          (meta?.approvalId ? ` ${theme.fg("dim", `(${meta.approvalId})`)}` : ""),
+          (meta?.approvalId
+            ? ` ${theme.fg("dim", `(${meta.approvalId})`)}`
+            : ""),
         1,
         0,
       ),
