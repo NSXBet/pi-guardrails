@@ -444,7 +444,7 @@ describe("checkDangerousCommand", () => {
 
     expect(result).toEqual({
       description: "recursive force delete",
-      pattern: "(structural)",
+      pattern: "rm -rf",
     });
   });
 
@@ -461,7 +461,7 @@ describe("checkDangerousCommand", () => {
 
     expect(result).toEqual({
       description: "recursive force delete",
-      pattern: "(structural)",
+      pattern: "rm -rf",
     });
   });
 
