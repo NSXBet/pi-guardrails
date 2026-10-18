@@ -250,6 +250,74 @@ describe("permissionGate extension hook", () => {
     );
   });
 
+  it("native askDialog deny returns { block: true } without the legacy component", async () => {
+    assert(toolCallHandler, "tool_call handler should be registered");
+
+    const ctx = createCtx({
+      ui: {
+        custom: vi.fn(),
+        select: vi.fn(),
+        askDialog: vi
+          .fn()
+          .mockResolvedValue({ kind: "submit", results: [{ selectedOptions: ["Deny"] }] }),
+      },
+    });
+
+    const result = await toolCallHandler(DANGEROUS_EVENT, ctx);
+
+    expect(result).toEqual({
+      block: true,
+      reason: "User denied dangerous command",
+    });
+    expect(ctx.ui.askDialog).toHaveBeenCalledTimes(1);
+    expect(ctx.ui.custom).not.toHaveBeenCalled();
+    expect(pi.events.emit).toHaveBeenCalledWith(
+      GUARDRAILS_ACTION_BLOCKED_EVENT,
+      expect.objectContaining({
+        block: expect.objectContaining({ source: "user" }),
+      }),
+    );
+  });
+
+  it("native askDialog allow proceeds without blocking", async () => {
+    assert(toolCallHandler, "tool_call handler should be registered");
+
+    const ctx = createCtx({
+      ui: {
+        custom: vi.fn(),
+        select: vi.fn(),
+        askDialog: vi
+          .fn()
+          .mockResolvedValue({ kind: "submit", results: [{ selectedOptions: ["Allow once"] }] }),
+      },
+    });
+
+    const result = await toolCallHandler(DANGEROUS_EVENT, ctx);
+
+    expect(result).toBeUndefined();
+    expect(ctx.ui.custom).not.toHaveBeenCalled();
+  });
+
+  it("native askDialog cancel fails safe to deny", async () => {
+    assert(toolCallHandler, "tool_call handler should be registered");
+
+    const ctx = createCtx({
+      ui: {
+        custom: vi.fn(),
+        select: vi.fn(),
+        askDialog: vi.fn().mockResolvedValue(undefined),
+      },
+    });
+
+    const result = await toolCallHandler(DANGEROUS_EVENT, ctx);
+
+    expect(result).toEqual({
+      block: true,
+      reason: "User denied dangerous command",
+    });
+    expect(ctx.ui.custom).not.toHaveBeenCalled();
+  });
+
   it("stop calls ctx.abort() and returns { block: true } with user-stop source", async () => {
     assert(toolCallHandler, "tool_call handler should be registered");
 
