@@ -28,8 +28,11 @@ import {
   sessionEscalation,
 } from "../session-escalation-prompt";
 import { isCommandAllowed, saveCommandSessionGrant } from "./grants";
+import {
+  confirmDangerousCommand,
+  type ConfirmResult,
+} from "./confirm";
 import { consumeApproval, issueApproval, peekApproval } from "./guidance";
-import { createPermissionGateConfirmComponent } from "./prompt";
 import {
   collectGuidancePatterns,
   createPermissionGateRule,
@@ -314,7 +317,6 @@ export default async function permissionGate(pi: ExtensionAPI) {
           return textResult(`[guardrails] ${reason}`);
         }
 
-        type ConfirmResult = "allow" | "allow-session" | "deny" | "stop";
         const promptOpened = createPromptOpenedPayload({
           feature: "permissionGate",
           action: safety.action,
@@ -326,25 +328,11 @@ export default async function permissionGate(pi: ExtensionAPI) {
 
         let result: ConfirmResult;
         try {
-          const customResult = await ctx.ui.custom<ConfirmResult>(
-            createPermissionGateConfirmComponent(command, safety.reason, {
-              agentReason,
-              approvalId: id,
-            }),
-          );
-          if (customResult === undefined) {
-            const selection = await ctx.ui.select(
-              `Dangerous command: ${safety.reason}`,
-              ["Allow once", "Allow for session", "Deny", "Decline and stop"],
-            );
-            if (selection === "Allow once") result = "allow";
-            else if (selection === "Allow for session")
-              result = "allow-session";
-            else if (selection === "Decline and stop") result = "stop";
-            else result = "deny";
-          } else {
-            result = customResult;
-          }
+          result = await confirmDangerousCommand(ctx.ui, {
+            command,
+            reason: safety.reason,
+            meta: { agentReason, approvalId: id },
+          });
         } finally {
           pi.events.emit(
             GUARDRAILS_PROMPT_CLOSED_EVENT,
@@ -508,7 +496,6 @@ export default async function permissionGate(pi: ExtensionAPI) {
       return { block: true, reason };
     }
 
-    type ConfirmResult = "allow" | "allow-session" | "deny" | "stop";
     const promptOpened = createPromptOpenedPayload({
       feature: "permissionGate",
       action: safety.action,
@@ -520,21 +507,10 @@ export default async function permissionGate(pi: ExtensionAPI) {
 
     let result: ConfirmResult;
     try {
-      const customResult = await ctx.ui.custom<ConfirmResult>(
-        createPermissionGateConfirmComponent(command, safety.reason),
-      );
-      if (customResult === undefined) {
-        const selection = await ctx.ui.select(
-          `Dangerous command: ${safety.reason}`,
-          ["Allow once", "Allow for session", "Deny", "Decline and stop"],
-        );
-        if (selection === "Allow once") result = "allow";
-        else if (selection === "Allow for session") result = "allow-session";
-        else if (selection === "Decline and stop") result = "stop";
-        else result = "deny";
-      } else {
-        result = customResult;
-      }
+      result = await confirmDangerousCommand(ctx.ui, {
+        command,
+        reason: safety.reason,
+      });
     } finally {
       pi.events.emit(
         GUARDRAILS_PROMPT_CLOSED_EVENT,
