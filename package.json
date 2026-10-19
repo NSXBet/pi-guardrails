@@ -27,7 +27,6 @@
     "extensions": [
       "./extensions/guardrails/index.ts",
       "./extensions/permission-gate/index.ts"
-    ]
     ],
     "video": "https://assets.aliou.me/github/aliou/pi-guardrails/demo.mp4",
     "image": "https://assets.aliou.me/github/aliou/pi-guardrails/banner.png"
