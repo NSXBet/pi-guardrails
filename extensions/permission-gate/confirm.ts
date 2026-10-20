@@ -33,6 +33,8 @@ export interface ConfirmDialogUI {
         questions: ConfirmAskDialogQuestion[],
         dialogOptions?: unknown,
     ): Promise<ConfirmAskDialogResult | undefined>;
+    /** Fire-and-forget toast, present on omp/pi ui contexts. Optional: tier-2 callers may omit it. */
+    notify?(message: string, level?: string): void;
 }
 
 const CONFIRM_LABELS = [
@@ -41,6 +43,13 @@ const CONFIRM_LABELS = [
     "Deny",
     "Decline and stop",
 ] as const;
+
+/**
+ * globalThis key pi-yuri-extensions' yes module uses. Lives on globalThis (not
+ * a module variable) because this extension and pi-yuri-extensions are loaded
+ * by separate jiti instances; globalThis is the only shared object.
+ */
+const YES_MODE_KEY = "__PI_YES_MODE__";
 
 function labelToResult(label: string | undefined): ConfirmResult {
     if (label === "Allow once") return "allow";
@@ -71,6 +80,20 @@ export async function confirmDangerousCommand(
     },
 ): Promise<ConfirmResult> {
     const { command, reason, meta } = args;
+
+    // YES mode (`pi --yes`, YES=1, /yes on) auto-approves every interactive
+    // prompt. Other extensions auto-approve by patching ctx.ui methods, but
+    // guardrails calls ui methods directly with `.call(ui, ...)`, so patches
+    // don't intercept it — check the flag at the single choke point instead.
+    const globals = globalThis as Record<string, unknown>;
+    if (globals[YES_MODE_KEY] === true) {
+        try {
+            ui.notify?.("[guardrails] YES mode: dangerous command auto-approved", "warning");
+        } catch {
+            // ui.notify is best-effort; auto-allow must not depend on it.
+        }
+        return "allow";
+    }
 
     const askDialog = ui.askDialog;
     if (typeof askDialog === "function") {

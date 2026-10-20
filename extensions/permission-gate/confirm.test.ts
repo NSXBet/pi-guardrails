@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, afterEach } from "vitest";
 import {
   confirmDangerousCommand,
   type ConfirmAskDialogResult,
@@ -128,6 +128,56 @@ describe("confirmDangerousCommand", () => {
       await expect(confirmDangerousCommand(ui, BASE_ARGS)).resolves.toBe(
         "deny",
       );
+    });
+  });
+
+  describe("YES mode (__PI_YES_MODE__, set by pi-yuri-extensions' yes module)", () => {
+    const YES_KEY = "__PI_YES_MODE__";
+    // Cast to a named const: this module and the yes module load via separate
+    // jiti instances, so globalThis (not module scope) is the shared state.
+    const globals = globalThis as Record<string, unknown>;
+    function setYes(value: boolean | undefined) {
+      if (value === undefined) delete globals[YES_KEY];
+      else globals[YES_KEY] = value;
+    }
+    afterEach(() => setYes(undefined));
+
+    it("auto-approves before any prompt when set", async () => {
+      setYes(true);
+      const askDialog = vi.fn(() =>
+        Promise.resolve<ConfirmAskDialogResult>(submit(["Deny"])),
+      );
+      const ui = makeUI({ askDialog });
+      await expect(confirmDangerousCommand(ui, BASE_ARGS)).resolves.toBe(
+        "allow",
+      );
+      expect(askDialog).not.toHaveBeenCalled();
+      expect(ui.custom).not.toHaveBeenCalled();
+      expect(ui.select).not.toHaveBeenCalled();
+    });
+
+    it("auto-approves on the tier-2 path too", async () => {
+      setYes(true);
+      const ui = makeUI();
+      await expect(confirmDangerousCommand(ui, BASE_ARGS)).resolves.toBe(
+        "allow",
+      );
+      expect(ui.custom).not.toHaveBeenCalled();
+      expect(ui.select).not.toHaveBeenCalled();
+    });
+
+    it("stays off when the global is false or absent", async () => {
+      for (const value of [false, undefined]) {
+        setYes(value);
+        const askDialog = vi.fn(() =>
+          Promise.resolve<ConfirmAskDialogResult>(submit(["Allow once"])),
+        );
+        const ui = makeUI({ askDialog });
+        await expect(confirmDangerousCommand(ui, BASE_ARGS)).resolves.toBe(
+          "allow",
+        );
+        expect(askDialog).toHaveBeenCalled();
+      }
     });
   });
 });
