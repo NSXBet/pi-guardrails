@@ -27,12 +27,10 @@ import {
   recordSessionEscalationApproval,
   sessionEscalation,
 } from "../session-escalation-prompt";
+import { type ConfirmResult, confirmDangerousCommand } from "./confirm";
 import { isCommandAllowed, saveCommandSessionGrant } from "./grants";
-import {
-  confirmDangerousCommand,
-  type ConfirmResult,
-} from "./confirm";
 import { consumeApproval, issueApproval, peekApproval } from "./guidance";
+import { isHostApprovalYolo } from "./host-yolo";
 import {
   collectGuidancePatterns,
   createPermissionGateRule,
@@ -416,10 +414,14 @@ export default async function permissionGate(pi: ExtensionAPI) {
     if (isCommandAllowed(command)) return;
 
     const pg = config.permissionGate;
+    // Effective yolo: this extension's switch, or the host running in yolo
+    // (omp `tools.approvalMode: yolo` via --yolo/--approval-mode). Both mean
+    // the operator already waived per-command prompting.
+    const yolo = pg.yolo || (await isHostApprovalYolo(pi));
 
     // Guidance soft-block. YOLO bypasses guidance along with permission prompts.
     // When enabled, yoloRespectAutoDeny below still decides whether auto-deny runs.
-    if (!pg.yolo) {
+    if (!yolo) {
       const guidancePatterns = collectGuidancePatterns(configLoader);
       const guidanceMatch = matchGuidancePattern(command, guidancePatterns);
       if (guidanceMatch) {
@@ -441,7 +443,7 @@ export default async function permissionGate(pi: ExtensionAPI) {
     }
 
     // Yolo: skip autoDeny and confirmation prompts.
-    if (pg.yolo && !pg.yoloRespectAutoDeny) return;
+    if (yolo && !pg.yoloRespectAutoDeny) return;
 
     const autoDenyMatch = matchCommandPattern(
       command,
@@ -460,7 +462,7 @@ export default async function permissionGate(pi: ExtensionAPI) {
     }
 
     // Yolo with yoloRespectAutoDeny: autoDeny ran above, skip the rest.
-    if (pg.yolo) return;
+    if (yolo) return;
 
     const safety = await checkAction(action, [
       createPermissionGateRule({

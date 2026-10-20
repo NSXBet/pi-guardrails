@@ -88,6 +88,20 @@ vi.mock("../../src/shared/config", () => {
 
 type ToolCallHandler = ExtensionHandler<ToolCallEvent, ToolCallEventResult>;
 
+// Controls what the host settings registry reports for tools.approvalMode.
+const registryMock = vi.hoisted(() => ({
+  lookup: undefined as undefined | ((id: string) => unknown),
+}));
+
+vi.mock("@oh-my-pi/pi-coding-agent/config/registry", () => ({
+  lookup: (id: string) => registryMock.lookup?.(id),
+}));
+
+function setHostApprovalMode(mode: string | undefined) {
+  registryMock.lookup =
+    mode === undefined ? undefined : (_id: string) => ({ get: () => mode });
+}
+
 function registeredToolCallHandler(pi: DeepMocked<ExtensionAPI>) {
   const calls: unknown[][] = pi.on.mock.calls;
   return calls.find(([event]) => event === "tool_call")?.[1] as
@@ -145,6 +159,8 @@ describe("permissionGate extension hook", () => {
 
   afterEach(() => {
     clearYoloSessionState();
+    setHostApprovalMode(undefined);
+    setPermissionGate({});
   });
   it("uses the host executor for approved commands when available", async () => {
     const exec = vi.fn().mockResolvedValue({
@@ -489,6 +505,66 @@ describe("permissionGate extension hook", () => {
         block: true,
         reason: expect.stringContaining("denied"),
       });
+    });
+  });
+
+  describe("host approval-mode yolo", () => {
+    it("skips the confirmation prompt when the host runs in yolo mode", async () => {
+      assert(toolCallHandler, "tool_call handler should be registered");
+      setHostApprovalMode("yolo");
+
+      const ctx = createCtx();
+      const result = await toolCallHandler(DANGEROUS_EVENT, ctx);
+
+      expect(result).toBeUndefined();
+      expect(ctx.ui.custom).not.toHaveBeenCalled();
+      expect(ctx.ui.select).not.toHaveBeenCalled();
+    });
+
+    it("bypasses autoDeny in host yolo mode when yoloRespectAutoDeny is false", async () => {
+      assert(toolCallHandler, "tool_call handler should be registered");
+      setHostApprovalMode("yolo");
+      setPermissionGate({
+        yoloRespectAutoDeny: false,
+        autoDenyPatterns: [{ pattern: "dangerous-cmd", description: "denied" }],
+      });
+
+      const result = await toolCallHandler(DANGEROUS_EVENT, createCtx());
+      expect(result).toBeUndefined();
+    });
+
+    it("still blocks autoDeny in host yolo mode when yoloRespectAutoDeny is true", async () => {
+      assert(toolCallHandler, "tool_call handler should be registered");
+      setHostApprovalMode("yolo");
+      setPermissionGate({
+        yoloRespectAutoDeny: true,
+        autoDenyPatterns: [{ pattern: "dangerous-cmd", description: "denied" }],
+      });
+
+      const result = await toolCallHandler(DANGEROUS_EVENT, createCtx());
+      expect(result).toEqual({
+        block: true,
+        reason: expect.stringContaining("denied"),
+      });
+    });
+
+    it("still prompts when the host runs in a non-yolo approval mode", async () => {
+      assert(toolCallHandler, "tool_call handler should be registered");
+      setHostApprovalMode("exec");
+
+      const ctx = createCtx();
+      await toolCallHandler(DANGEROUS_EVENT, ctx);
+
+      expect(ctx.ui.custom).toHaveBeenCalledTimes(1);
+    });
+
+    it("still prompts when the host registry is unavailable", async () => {
+      assert(toolCallHandler, "tool_call handler should be registered");
+
+      const ctx = createCtx();
+      await toolCallHandler(DANGEROUS_EVENT, ctx);
+
+      expect(ctx.ui.custom).toHaveBeenCalledTimes(1);
     });
   });
 
